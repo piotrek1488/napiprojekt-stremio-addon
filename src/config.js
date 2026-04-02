@@ -1,10 +1,17 @@
+const result = require('dotenv').config();
+if (result.error) {
+  console.warn("⚠️ Plik .env nie istnieje, używane będą wartości domyślne");
+}
 const PORT = process.env.PORT || 7000
 const HOSTNAME_URL = process.env.HOSTNAME_URL || "http://localhost"
+const PUBLIC_URL = `${HOSTNAME_URL}:${PORT}`
+const STREMIO_URL = PUBLIC_URL.replace(/^https?:\/\//, "stremio://")
 
 config = {
-  PORT: PORT,
-  HOSTNAME_URL: HOSTNAME_URL,
-  PUBLIC_URL: `${HOSTNAME_URL}:${PORT}`,
+  PORT,
+  HOSTNAME_URL,
+  STREMIO_URL,
+  PUBLIC_URL,
   OS_API_KEY: process.env.OS_API_KEY || "",
   ENABLE_OS_FALLBACK: process.env.ENABLE_OS_FALLBACK === "true"
 }
