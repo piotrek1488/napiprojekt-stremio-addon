@@ -1,13 +1,17 @@
+const PORT = process.env.PORT || 7000
+const HOSTNAME_URL = process.env.HOSTNAME_URL || "http://localhost"
+
 config = {
-  PORT: process.env.PORT || 7000,
-  PUBLIC_URL: process.env.PUBLIC_URL || "http://localhost:7000",
+  PORT: PORT,
+  HOSTNAME_URL: HOSTNAME_URL,
+  PUBLIC_URL: `${HOSTNAME_URL}:${PORT}`,
   OS_API_KEY: process.env.OS_API_KEY || "",
   ENABLE_OS_FALLBACK: process.env.ENABLE_OS_FALLBACK === "true"
 }
 
 function validateConfig() {
   console.log("=== CONFIG ===")
-
+  console.log("HOSTNAME_URL:", config.HOSTNAME_URL)
   console.log("PORT:", config.PORT)
   console.log("PUBLIC_URL:", config.PUBLIC_URL)
 

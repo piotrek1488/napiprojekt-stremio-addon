@@ -1,5 +1,5 @@
 const express = require("express")
-const { PORT } = require("./config")
+const { PORT, PUBLIC_URL } = require("./config")
 const stremioRouter = require("./stremio")
 const { getSubtitle } = require("./services/subtitles.service")
 const { validateConfig } = require("./config")
@@ -7,7 +7,7 @@ validateConfig()
 
 const app = express()
 
-app.use("/stremio", stremioRouter)
+app.use("/", stremioRouter)
 
 app.get("/sub/:hash", async (req,res)=>{
   const txt = await getSubtitle(req.params.hash)
@@ -17,6 +17,6 @@ app.get("/sub/:hash", async (req,res)=>{
 })
 
 app.listen(PORT, () => {
-  console.log(`Serwer działa na http://localhost:${PORT}`)
-  console.log(`Router Stremio dostępny pod /stremio`)
+  console.log(`Serwer działa na ${PUBLIC_URL}`)
+  // console.log(`Router Stremio dostępny pod /`)
 })

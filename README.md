@@ -25,7 +25,7 @@ npm  install
 
 2. Ustaw zmienne środowiskowe (opcjonalnie):
 ```bash
-export  PUBLIC_URL="https://twojadomena.com"
+export  HOSTNAME_URL="https://twojadomena.com"
 export  PORT=7000
 #Klucz API do OpenSubtitles:
 export  OS_API_KEY="TWÓJ_KLUCZ_API"
@@ -38,7 +38,7 @@ export  ENABLE_OS_FALLBACK=true
 npm  start
 ```
 
-4. Dodaj addon do Stremio używając URL: http://localhost:7000/manifest.json
+4. Dodaj addon do Stremio używając URL: http://localhost:7000/manifest.json lub https://twojadomena.com:PORT/manifest.json
 
 ## Uwagi dotyczące działania
 

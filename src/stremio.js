@@ -1,7 +1,7 @@
 // src/stremio.js
 const { findSubtitles } = require("./services/subtitles.service")
 const { searchSubtitles: searchOS } = require("./services/opensubtitles.service")
-const { ENABLE_OS_FALLBACK, OS_API_KEY } = require("./config")
+const { ENABLE_OS_FALLBACK, OS_API_KEY, PUBLIC_URL, PORT } = require("./config")
 const StremioSDK = require("stremio-addon-sdk")
 const addonBuilder = StremioSDK.addonBuilder 
 const getRouter = StremioSDK.getRouter
@@ -12,9 +12,11 @@ const builder = new addonBuilder({
   version: "1.0.0",
   name: "NapiProjekt",
   description: "Polskie napisy do filmów i seriali",
+  logo: "./icon.jpg",
+  background: "",
   catalogs: [],
   resources: ["subtitles"],
-  types: ["movie"],
+  types: ["movie", "series"],
   idPrefixes: ["tt"],
   config: []
 })
