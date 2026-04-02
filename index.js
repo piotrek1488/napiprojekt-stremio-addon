@@ -305,10 +305,12 @@ function cleanupCache() {
 /** ---------- addon ---------- */
 
 const manifest = {
-  id: "org.example.napiprojekt.polish-subtitles",
+  id: "napiprojekt.polish-subtitles",
   version: "1.0.0",
   name: "NapiProjekt Polish Subtitles",
   description: "Best-effort Polish subtitles from NapiProjekt with runtime/release scoring.",
+  logo: "./icon.jpg",
+  contactEmail: "piotrek1488gmail.com",
   resources: ["subtitles"],
   types: ["movie", "series"],
   idPrefixes: ["tt"],

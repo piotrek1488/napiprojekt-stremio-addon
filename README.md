@@ -1,41 +1,51 @@
-# NapiProjekt Stremio addon
+# NapiProjekt + OpenSubtitles Stremio Addon
 
-To jest best-effort addon do polskich napisów z NapiProjekt.
+Addon do Stremio, który pobiera polskie napisy z NapiProjekt oraz OpenSubtitles jeśli na pierwszym serwisie ich nie ma.
 
-## Co robi
+## Funkcje
 
-Addon:
-- bierze `id`, `filename` i dostępne metadane z requestu napisów w Stremio,
-- próbuje znaleźć stronę filmu w NapiProjekt,
-- ocenia pasujące napisy po długości i po słowach z release/nazwy pliku,
-- pobiera wybrany plik przez API NapiProjekt i wystawia go lokalnie pod URL-em dla Stremio.
+- Scraping NapiProjekt
 
-## Ważne ograniczenie
+- Pobieranie najlepszych wersji napisów `.srt`
 
-Stremio w requestach napisów przekazuje tylko metadane, `videoHash` w formacie OpenSubtitles, rozmiar pliku i nazwę pliku. Nie przekazuje samych bajtów filmu, więc napiprojektowy hash z pliku nie da się policzyć 1:1 bez dodatkowego lokalnego bridge'a.
+- Fallback do OpenSubtitles
 
-## Uruchomienie
+- Cache w pamięci
 
+- Retry i timeout przy pobieraniu
+
+- Kompatybilne z Stremio
+
+## Instalacja
+
+1. Zainstaluj zależności:
 ```bash
-npm install
-PUBLIC_URL=http://localhost:7000 npm start
+npm  install
 ```
 
-Jeśli hostujesz to zdalnie, ustaw `PUBLIC_URL` na publiczny adres tego serwera.
-
-## Instalacja w Stremio
-
-Wklej URL manifestu:
-
-```text
-http://localhost:7000/manifest.json
+2. Ustaw zmienne środowiskowe (opcjonalnie):
+```bash
+export  PUBLIC_URL="https://twojadomena.com"
+export  PORT=7000
+#Klucz API do OpenSubtitles:
+export  OS_API_KEY="TWÓJ_KLUCZ_API"
+#Jeśli nie znajdzie napisów w Napiprojekt, wyszukaj w OpenSubtitles:
+export  ENABLE_OS_FALLBACK=true
 ```
 
-albo publiczny adres swojego serwera.
+3. Uruchom serwer:
+```bash
+npm  start
+```
 
-## Uwagi
+4. Dodaj addon do Stremio używając URL: http://localhost:7000/manifest.json
 
-Jeśli NapiProjekt zwróci wiele wersji, addon próbuje wybrać najlepszą na podstawie:
-- zgodności czasu trwania,
-- dopasowania słów z release i nazwy pliku,
-- zgodności tytułu z metadanymi z Cinemeta.
+## Uwagi dotyczące działania
+
+- Addon najpierw próbuje NapiProjekt. Jeśli nie znajdzie napisów, automatycznie przechodzi do OpenSubtitles.
+
+- Nazwy plików wideo mają duże znaczenie dla dopasowania napisów. Najlepsze efekty dają nazwy w stylu *The.Matrix.1999.1080p.BluRay.x264*.
+
+- Jeśli OpenSubtitles zwraca wiele wyników, addon wybiera 3 pierwsze.
+
+- Można modyfikować scoring i ranking w [scoring.service.js](./src/services/scoring.service.js).
