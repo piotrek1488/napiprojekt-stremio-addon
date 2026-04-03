@@ -10,38 +10,44 @@ HEADERS = {
 }
 
 async def fetch_by_hash(v_hash: str):
-    """Opcja 2: Pobieranie bezpośrednio po skrócie pliku (API)"""
     if not v_hash:
         return []
     
-    # NapiProjekt wymaga specyficznego formatu zapytania dla swojego API
-    # To jest uproszczona wersja ich protokołu
+    # API NapiProjekt wymaga specyficznego wyliczenia sumy kontrolnej dla zapytania
+    # Wersja uproszczona, która często działa z ich oficjalnym endpointem:
     url = "http://napiprojekt.pl/api/api-napiprojekt3.php"
+    
+    # Przygotowanie danych zgodnie z protokołem (dodajemy parametry pomocnicze)
     data = {
         "download": "1",
         "vhash": v_hash,
         "mode": "1",
-        "lang": "PL"
+        "lang": "PL",
+        "inf": "1" # Prosimy o dodatkowe informacje o pliku
     }
     
     try:
         async with httpx.AsyncClient() as client:
-            # API Napi często nie wymaga skomplikowanych nagłówków, byle hash był poprawny
-            resp = await client.post(url, data=data, timeout=5.0)
+            # Udajemy oficjalny program NapiProjekt
+            headers = {"User-Agent": "NapiProjekt/2.0.2.0"}
+            resp = await client.post(url, data=data, headers=headers, timeout=5.0)
+            
+            # Napi API zwraca XML. Sprawdzamy czy sukces.
             if resp.status_code == 200 and "status=\"success\"" in resp.text:
                 print(f"🎯 Sukces! Znaleziono napisy po videoHash: {v_hash}")
-                # Tutaj musiałby nastąpić parsowanie XML z odpowiedzią API
-                # Dla uproszczenia zwracamy strukturę, którą Twój system już zna
+                # Tutaj zwracamy wynik. 
+                # UWAGA: Aby napisy działały w Stremio, będziemy potrzebowali 
+                # endpointu, który je pobierze i rozpakuje (Napi zwraca binarny XML).
                 return [{
                     "id": f"napi_hash_{v_hash}",
-                    "url": f"http://napiprojekt.pl/pobierz/{v_hash}", # Przykładowy link
+                    "url": f"https://twoja-domena.com/proxy/napi/{v_hash}", 
                     "lang": "pol",
-                    "releaseName": "Dopasowano po Hashu (Idealne)",
+                    "releaseName": "Dopasowano idealnie (Hash)",
                     "source": "NapiProjekt-Hash",
                     "score": 100
                 }]
     except Exception as e:
-        print(f"⚠️ Błąd przy szukaniu po hashu: {e}")
+        print(f"⚠️ Błąd API Napi: {e}")
     return []
 
 async def fetch_by_search(query: str):
