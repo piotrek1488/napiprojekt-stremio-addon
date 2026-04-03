@@ -9,7 +9,7 @@ const app = express()
 const fs = require("fs")
 const indexPath = path.resolve(__dirname, "public", "index.html")
 
-app.get("/", (req, res) => {
+app.get("/start", (req, res) => {
   try {
     let html = fs.readFileSync(indexPath, "utf8")
     html = html
@@ -22,7 +22,7 @@ app.get("/", (req, res) => {
   }
 })
 
-app.use("/stremio", (req, res, next) => { req.url = req.url.replace(/^\/stremio/, ""), next() }, stremioRouter)
+app.use(stremioRouter)
 app.get("/sub/:hash", async (req,res)=>{
   const txt = await getSubtitle(req.params.hash)
   if(!txt) return res.status(404).send("not found")
@@ -31,6 +31,6 @@ app.get("/sub/:hash", async (req,res)=>{
 })
 
 app.listen(PORT, () => {
-  console.log(`Serwer działa na ${PUBLIC_URL}`)
+  console.log(`Serwer działa na ${PUBLIC_URL}/start`)
   console.log(`Router Stremio dostępny pod /stremio`)
 })
