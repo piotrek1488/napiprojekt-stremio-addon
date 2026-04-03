@@ -54,7 +54,7 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.7",
+        "version": "1.0.8",
         "name": "NapiProjekt & OS PL",
         "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
