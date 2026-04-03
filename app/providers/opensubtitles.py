@@ -1,39 +1,47 @@
 import httpx
 
 async def search_opensubtitles(imdb_id: str):
-    print(f"📡 Pobieram prawdziwe napisy z OpenSubtitles dla ID: {imdb_id}")
+    # Usuwamy 'tt', bo API OS czasami woli same cyfry
+    numeric_id = imdb_id.replace("tt", "")
+    print(f"📡 Zapytanie do OpenSubtitles dla ID: {numeric_id}")
     
-    # Używamy publicznego API opensubtitles.com (wymaga User-Agent!)
-    # Uwaga: darmowe API bez klucza ma limity, ale na testy wystarczy.
-    url = f"https://rest.opensubtitles.org/search/imdbid-{imdb_id}/sublanguageid-pol"
+    url = f"https://rest.opensubtitles.org/search/imdbid-{numeric_id}/sublanguageid-pol"
     
     headers = {
-        "User-Agent": "TemporaryUserAgent", # OpenSubtitles wymaga jakiegokolwiek UA
-        "X-User-Agent": "TemporaryUserAgent"
+        "User-Agent": "StremioPolishAddon v1", # Musi być cokolwiek unikalnego
+        "X-User-Agent": "StremioPolishAddon v1"
     }
 
     try:
-        async with httpx.AsyncClient(headers=headers) as client:
+        async with httpx.AsyncClient(headers=headers, follow_redirects=True) as client:
             response = await client.get(url, timeout=10.0)
             
             if response.status_code == 200:
                 data = response.json()
+                # LOGOWANIE SUROWYCH DANYCH - zobaczysz to w logach Rendera
+                print(f"DEBUG OS: Odebrano {len(data)} elementów z API")
+                
                 results = []
+                for item in data[:10]: # Bierzemy do 10 wyników
+                    download_link = item.get("SubDownloadLink")
+                    if download_link:
+                        # Zamiana na .srt omija problemy z rozpakowywaniem .gz
+                        final_url = download_link.replace(".gz", ".srt")
+                        
+                        results.append({
+                            "id": f"os_{item.get('IDSubtitle')}",
+                            "url": final_url,
+                            "lang": "pol",
+                            "releaseName": item.get("MovieReleaseName") or "OpenSubtitles",
+                            "source": "OpenSubtitles"
+                        })
                 
-                # API OpenSubtitles zwraca listę obiektów
-                for item in data[:5]: # Bierzemy 5 pierwszych wyników
-                    results.append({
-                        "id": f"os_{item.get('IDSubtitle')}",
-                        # WAŻNE: Link musi prowadzić bezpośrednio do pliku .srt
-                        "url": item.get("SubDownloadLink").replace(".gz", ""), 
-                        "lang": "pol",
-                        "releaseName": item.get("MovieReleaseName") or "OpenSubtitles Release",
-                        "source": "OpenSubtitles"
-                    })
-                
-                print(f"✅ Znaleziono {len(results)} napisów w OpenSubtitles")
+                print(f"✅ Sukces: Znaleziono {len(results)} napisów w OpenSubtitles")
                 return results
+            else:
+                print(f"⚠️ OpenSubtitles zwrócił status: {response.status_code}")
+                
     except Exception as e:
-        print(f"❌ Błąd podczas komunikacji z OpenSubtitles: {e}")
+        print(f"❌ Błąd OpenSubtitles: {e}")
         
     return []
