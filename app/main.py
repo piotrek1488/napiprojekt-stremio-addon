@@ -52,13 +52,19 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "name": "NapiProjekt Stremio Addon",
         "description": "Polskie napisy z NapiProjekt, OpenSubtitles i systemem dopasowania.",
         "logo": f"{protocol}://{host}/static/icon.png",
         "types": ["movie", "series"],
         "catalogs": [],
-        "resources": ["subtitles"]
+        "resources": [
+            {
+            "name": "subtitles",
+            "types": ["movie", "series"],
+            "id_prefixes": ["tt"]
+            }
+        ]
     }
 
 @app.get("/subtitles/{type}/{id}/{extra:path}")
