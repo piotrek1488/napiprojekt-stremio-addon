@@ -54,7 +54,7 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.10",
+        "version": "1.0.11",
         "name": "NapiProjekt & OS PL",
         "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
@@ -132,7 +132,7 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
         })
 
     # Szukanie po tytule POLSKIM (jako backup)
-    if polish_title:
+    if polish_title and polish_title != original_title:
         safe_pl = urllib.parse.quote(polish_title)
         napi_results.append({
             "id": f"napi_t_pl_{safe_pl}",
