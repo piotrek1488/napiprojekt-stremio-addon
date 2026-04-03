@@ -8,12 +8,9 @@ validateConfig()
 const app = express()
 const fs = require("fs")
 
-// serwujemy wszystkie pliki statyczne z public
-app.use(express.static(path.join(__dirname, ".." ,"public")));
-
 app.get("/", (req, res) => {
   // wczytaj index.html
-  const html = require("fs").readFileSync(path.join(__dirname, "..", "public", "index.html"), "utf8")
+  let html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8")
 
   // podmień %PUBLIC_URL% na wartość z config
   html = html
