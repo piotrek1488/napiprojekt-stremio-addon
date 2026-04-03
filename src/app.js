@@ -7,25 +7,20 @@ const { validateConfig } = require("./config")
 validateConfig()
 const app = express()
 const fs = require("fs")
-const publicPath = path.resolve(__dirname, "../public")
-const indexPath = path.join(publicPath, "index.html")
-app.use(express.static(publicPath))
 
 app.get("/", (req, res) => {
-  try {
-    let html = fs.readFileSync(indexPath, "utf8")
-    html = html
-      .replace(/%PUBLIC_URL%/g, PUBLIC_URL)
-      .replace(/%STREMIO_URL%/g, STREMIO_URL)
-    res.send(html)
-  } catch (err) {
-    console.error("Błąd wczytywania index.html:", err)
-    res.status(500).send("Error loading page")
-  }
+  // wczytaj index.html
+  let html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8")
+
+  // podmień %PUBLIC_URL% na wartość z config
+  html = html
+    .replace(/%PUBLIC_URL%/g, PUBLIC_URL)
+    .replace(/%STREMIO_URL%/g, STREMIO_URL)
+
+  res.send(html)
 })
 
 app.use("/stremio", stremioRouter)
-
 app.get("/sub/:hash", async (req,res)=>{
   const txt = await getSubtitle(req.params.hash)
   if(!txt) return res.status(404).send("not found")
@@ -35,5 +30,5 @@ app.get("/sub/:hash", async (req,res)=>{
 
 app.listen(PORT, () => {
   console.log(`Serwer działa na ${PUBLIC_URL}`)
-  console.log(`Router Stremio dostępny pod ${PUBLIC_URL}/stremio`)
+  console.log(`Router Stremio dostępny pod /stremio`)
 })
