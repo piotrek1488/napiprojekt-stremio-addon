@@ -5,3 +5,4 @@ beautifulsoup4
 thefuzz
 cachetools
 python-Levenshtein
+python-dotenv
