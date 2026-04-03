@@ -2,9 +2,14 @@ const result = require('dotenv').config();
 if (result.error) {
   console.warn("⚠️ Plik .env nie istnieje, używane będą wartości domyślne");
 }
+const isProd = process.env.NODE_ENV === "production";
 const PORT = process.env.PORT || 7000
 const HOSTNAME_URL = process.env.HOSTNAME_URL || "http://localhost"
-const PUBLIC_URL = `${HOSTNAME_URL}:${PORT}`
+// PUBLIC_URL bierze pod uwagę port tylko lokalnie
+const PUBLIC_URL = isProd
+  ? HOSTNAME_URL                 // produkcja – nie dodajemy portu
+  : `${HOSTNAME_URL}:${PORT}`;   // lokalnie – dorzuć port
+
 const STREMIO_URL = PUBLIC_URL.replace(/^https?:\/\//, "stremio://")
 
 config = {
