@@ -7,7 +7,9 @@ const { validateConfig } = require("./config")
 validateConfig()
 const app = express()
 const fs = require("fs")
-const indexPath = path.resolve(__dirname, "public", "index.html")
+const publicPath = path.resolve(__dirname, "../public")
+const indexPath = path.join(publicPath, "index.html")
+app.use(express.static(publicPath))
 
 // root redirect na /start
 app.get("/", (req, res) => {
