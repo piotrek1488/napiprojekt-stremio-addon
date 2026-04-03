@@ -11,12 +11,7 @@ const publicPath = path.resolve(__dirname, "../public")
 const indexPath = path.join(publicPath, "index.html")
 app.use(express.static(publicPath))
 
-// root redirect na /start
 app.get("/", (req, res) => {
-  res.redirect("/start")
-})
-
-app.get("/start", (req, res) => {
   try {
     let html = fs.readFileSync(indexPath, "utf8")
     html = html
@@ -29,7 +24,8 @@ app.get("/start", (req, res) => {
   }
 })
 
-app.use(stremioRouter)
+app.use("/stremio", stremioRouter)
+
 app.get("/sub/:hash", async (req,res)=>{
   const txt = await getSubtitle(req.params.hash)
   if(!txt) return res.status(404).send("not found")
@@ -38,6 +34,6 @@ app.get("/sub/:hash", async (req,res)=>{
 })
 
 app.listen(PORT, () => {
-  console.log(`Serwer działa na ${PUBLIC_URL}/start`)
-  console.log(`Router Stremio dostępny pod /stremio`)
+  console.log(`Serwer działa na ${PUBLIC_URL}`)
+  console.log(`Router Stremio dostępny pod ${PUBLIC_URL}/stremio`)
 })
