@@ -9,6 +9,11 @@ const app = express()
 const fs = require("fs")
 const indexPath = path.resolve(__dirname, "public", "index.html")
 
+// root redirect na /start
+app.get("/", (req, res) => {
+  res.redirect("/start")
+})
+
 app.get("/start", (req, res) => {
   try {
     let html = fs.readFileSync(indexPath, "utf8")
