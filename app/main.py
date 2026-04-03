@@ -1,21 +1,23 @@
 import urllib.parse
 import os
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from app.providers.napiprojekt import scrape_napiprojekt
+from dotenv import load_dotenv
+
+# Importy Twoich modułów
+from app.providers.napiprojekt import scrape_napiprojekt, fetch_by_hash
 from app.providers.opensubtitles import search_opensubtitles
 from app.utils.scoring import score_subtitles
 from app.cache import subtitle_cache
 from app.utils.tmdb import get_movie_details
-from dotenv import load_dotenv
+from app.utils.napi_decoder import get_napi_subtitles_text
 
-load_dotenv() # Wczytuje plik .env
+load_dotenv()
 
 app = FastAPI()
 
-# Niezbędne dla Stremio!
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -24,7 +26,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Montowanie plików statycznych
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -33,114 +34,133 @@ if os.path.exists("static"):
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request):
     host = request.headers.get("host", "127.0.0.1:7000")
+    protocol = "https" if "onrender.com" in host else "http"
+    full_url = f"{protocol}://{host}"
     try:
         with open("static/index.html", "r", encoding="utf-8") as f:
             content = f.read()
-        rendered_content = content.replace("{public_url}", host)
-        rendered_content = rendered_content.replace("{stremio_url}", f"stremio://{host}")
+        rendered_content = content.replace("{public_url}", full_url)
+        rendered_content = rendered_content.replace("{stremio_url}", f"stremio://{host}/manifest.json")
         return HTMLResponse(content=rendered_content)
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Błąd: Plik static/index.html nie istnieje!</h1>", status_code=404)
 
-# --- STREMIO ADDON LOGIC ---
+# --- STREMIO MANIFEST ---
 
 @app.get("/manifest.json")
 async def get_manifest(request: Request):
-    # Dynamiczne logo, żeby zawsze działało (Lokalnie i na Renderze)
     host = request.headers.get("host", "127.0.0.1:7000")
     protocol = "https" if "onrender.com" in host else "http"
     
     return {
-        "id": "org.stremio.addon.napiprojekt",
-        "version": "1.0.3",
-        "name": "NapiProjekt Stremio Addon",
-        "description": "Polskie napisy z NapiProjekt, OpenSubtitles i systemem dopasowania.",
+        "id": "org.stremio.addon.napiprojekt.v2",
+        "version": "1.0.6", # Podbita wersja
+        "name": "NapiProjekt & OS PL",
+        "description": "Polskie napisy dopasowane po hashu z NapiProjekt (Fix 403) oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
         "types": ["movie", "series"],
         "resources": [
             {
-            "name": "subtitles",
-            "types": ["movie", "series"],
-            "id_prefixes": ["tt"]
+                "name": "subtitles",
+                "types": ["movie", "series"],
+                "id_prefixes": ["tt"]
             }
         ],
         "catalogs": []
     }
 
+# --- GŁÓWNY ENDPOINT NAPISÓW ---
+
 @app.get("/subtitles/{type}/{id}/{extra:path}")
 @app.get("/subtitles/{type}/{id}.json")
-async def get_subtitles(type: str, id: str, extra: str = None):
-    # 1. Oczyszczanie ID
+async def get_subtitles(type: str, id: str, request: Request, extra: str = None):
+    # 1. Przygotowanie ID i hosta
     clean_id = id.replace(".json", "")
     imdb_id = clean_id.split(":")[0] if ":" in clean_id else clean_id
+    host_url = f"{request.url.scheme}://{request.url.netloc}"
     
-    print(f"✅ Zapytanie: {type} | ID: {imdb_id} | Extra: {extra}")
-
-    # --- LOGIKA WYCIĄGANIA HASHA (Teraz poprawnie wewnątrz funkcji) ---
     video_hash = ""
     release_name = ""
 
+    # 2. Wyciąganie hasha i nazwy pliku
     if extra:
-        # KLUCZOWA POPRAWKA: usuwamy .json z całego ciągu extra, zanim go przeparsujemy
         clean_extra = extra.replace(".json", "")
-        parsed_extra = urllib.parse.parse_qs(clean_extra)
-        if "videoHash" in parsed_extra:
-            video_hash = parsed_extra["videoHash"][0]
-            print(f"🔑 Znaleziono videoHash: {video_hash}")
-        if "filename" in parsed_extra:
-            release_name = parsed_extra["filename"][0]
+        # Obsługa specyficznego formatu Stremio (klucz=wartość)
+        if "videoHash=" in clean_extra:
+            parsed = urllib.parse.parse_qs(clean_extra)
+            video_hash = parsed.get("videoHash", [""])[0]
+            release_name = parsed.get("filename", [""])[0]
+    
+    print(f"🎬 Zapytanie: {imdb_id} | Hash: {video_hash}")
 
-    # 2. Sprawdzamy Cache
-    cache_key = f"{type}_{clean_id}_{video_hash}"
+    # 3. Cache
+    cache_key = f"{type}_{imdb_id}_{video_hash}"
     if cache_key in subtitle_cache:
-        print("🚀 [CACHE] Zwracam z pamięci podręcznej")
         return {"subtitles": subtitle_cache[cache_key]}
         
     all_subtitles = []
 
-    # 3. TMDB
-    movie_info = await get_movie_details(imdb_id)
-    search_query = movie_info["full_query"] if movie_info else imdb_id
-    print(f"🔍 Szukam napisów dla: {search_query}")
-    
-    # 4. Scrapowanie NapiProjekt (z przekazaniem v_hash)
-    try:
-        napi_results = await scrape_napiprojekt(search_query, v_hash=video_hash)
-        all_subtitles.extend(napi_results)
-    except Exception as e:
-        print(f"❌ Błąd NapiProjekt: {e}")
-    
-    # 5. Fallback do OpenSubtitles
-    if len(all_subtitles) < 2:
+    # 4. PRÓBA 1: NapiProjekt po Hashu (Najdokładniejsze)
+    if video_hash:
         try:
-            os_results = await search_opensubtitles(imdb_id)
-            all_subtitles.extend(os_results)
-        except Exception as e:
-            print(f"❌ Błąd OpenSubtitles: {e}")
-        
-    # 6. Finalne ustalenie release_name do scoringu
-    if not release_name and extra:
-        try:
-            release_name = extra.split("/")[-1] if "/" in extra else extra
-        except:
-            release_name = ""
+            # Wywołujemy TYLKO scrape_napiprojekt. 
+            # Ta funkcja w środku sama użyje fetch_by_hash i zwróci gotową listę.
+            napi_results = await scrape_napiprojekt(search_query, v_hash=video_hash, host_url=host_url)
             
-    # 7. Scoring
+            if napi_results:
+                print(f"✅ NapiProjekt: Znaleziono i przygotowano link proxy dla {video_hash}")
+                all_subtitles.extend(napi_results)
+            else:
+                print(f"ℹ️ NapiProjekt: Brak wyników dla hasha {video_hash}")
+                
+        except Exception as e:
+            print(f"❌ Błąd modułu NapiProjekt: {e}")
+
+    # 5. PRÓBA 2: OpenSubtitles (Fallback)
+    try:
+        os_results = await search_opensubtitles(imdb_id)
+        all_subtitles.extend(os_results)
+    except Exception as e:
+        print(f"❌ Błąd OpenSubtitles: {e}")
+
+    # 6. Scoring i Formatowanie
     scored = score_subtitles(all_subtitles, release_name)
     
-    # 8. Formatowanie pod Stremio
     stremio_subtitles = []
     for sub in scored:
-        score = sub.get("score", 0)
-        source = sub.get("source", "N/A")
-        rel_name = sub.get("releaseName", "Unknown")
-        
         stremio_subtitles.append({
             "id": sub["id"],
             "url": sub["url"],
-            "lang": sub.get("lang", "pol"),
-            "title": f"[{source}] {rel_name} (Match: {score}%)"
+            "lang": "pol",
+            "title": f"[{sub.get('source', 'N/A')}] {sub.get('releaseName', 'Unknown')} ({sub.get('score', 0)}%)"
         })
         
     subtitle_cache[cache_key] = stremio_subtitles
     return {"subtitles": stremio_subtitles}
+
+# --- PROXY: POBIERANIE, DEKODOWANIE I ROZPAKOWYWANIE ---
+
+@app.get("/fetch-napi/{v_hash}.srt")
+async def fetch_napi_proxy(v_hash: str):
+    """
+    Ten endpoint jest wywoływany przez Stremio, gdy użytkownik wybierze napisy NapiProjekt.
+    Pobiera XML, rozpakowuje 7zip hasłem i zwraca czysty tekst SRT.
+    """
+    print(f"📡 Proxy: Pobieram napisy dla hasha {v_hash}")
+    subs_text = await get_napi_subtitles_text(v_hash)
+    
+    if subs_text:
+        return Response(
+            content=subs_text,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f"attachment; filename={v_hash}.srt",
+                "Content-Type": "text/plain; charset=utf-8"
+            }
+        )
+    return Response(content="Nie znaleziono napisów lub błąd dekodowania.", status_code=404)
+
+if __name__ == "__main__":
+    import uvicorn
+    # Port 7000 dla lokalnych testów
+    uvicorn.run(app, host="0.0.0.0", port=7000)

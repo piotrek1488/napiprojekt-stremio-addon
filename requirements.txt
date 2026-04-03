@@ -6,3 +6,4 @@ thefuzz
 cachetools
 python-Levenshtein
 python-dotenv
+py7zr
