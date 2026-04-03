@@ -54,7 +54,7 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.6", # Podbita wersja
+        "version": "1.0.6",
         "name": "NapiProjekt & OS PL",
         "description": "Polskie napisy dopasowane po hashu z NapiProjekt (Fix 403) oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
@@ -85,7 +85,6 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     # 2. Wyciąganie hasha i nazwy pliku
     if extra:
         clean_extra = extra.replace(".json", "")
-        # Obsługa specyficznego formatu Stremio (klucz=wartość)
         if "videoHash=" in clean_extra:
             parsed = urllib.parse.parse_qs(clean_extra)
             video_hash = parsed.get("videoHash", [""])[0]
@@ -93,22 +92,28 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     
     print(f"🎬 Zapytanie: {imdb_id} | Hash: {video_hash}")
 
-    # 3. Cache
+    # 3. NOWA SEKCJA: Pobieranie danych o filmie i definicja search_query
+    movie_info = await get_movie_details(imdb_id)
+    if movie_info and "full_query" in movie_info:
+        search_query = movie_info["full_query"]
+    else:
+        search_query = imdb_id # Fallback do tt1234567 jeśli TMDB zawiedzie
+
+    # 4. Cache
     cache_key = f"{type}_{imdb_id}_{video_hash}"
     if cache_key in subtitle_cache:
         return {"subtitles": subtitle_cache[cache_key]}
         
     all_subtitles = []
 
-    # 4. PRÓBA 1: NapiProjekt po Hashu (Najdokładniejsze)
+    # 5. PRÓBA 1: NapiProjekt po Hashu
     if video_hash:
         try:
-            # Wywołujemy TYLKO scrape_napiprojekt. 
-            # Ta funkcja w środku sama użyje fetch_by_hash i zwróci gotową listę.
+            # Teraz search_query już jest zdefiniowane wyżej!
             napi_results = await scrape_napiprojekt(search_query, v_hash=video_hash, host_url=host_url)
             
             if napi_results:
-                print(f"✅ NapiProjekt: Znaleziono i przygotowano link proxy dla {video_hash}")
+                print(f"✅ NapiProjekt: Znaleziono link proxy dla {video_hash}")
                 all_subtitles.extend(napi_results)
             else:
                 print(f"ℹ️ NapiProjekt: Brak wyników dla hasha {video_hash}")
@@ -116,14 +121,14 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
         except Exception as e:
             print(f"❌ Błąd modułu NapiProjekt: {e}")
 
-    # 5. PRÓBA 2: OpenSubtitles (Fallback)
+    # 6. PRÓBA 2: OpenSubtitles (Fallback)
     try:
         os_results = await search_opensubtitles(imdb_id)
         all_subtitles.extend(os_results)
     except Exception as e:
         print(f"❌ Błąd OpenSubtitles: {e}")
 
-    # 6. Scoring i Formatowanie
+    # 7. Scoring i Formatowanie
     scored = score_subtitles(all_subtitles, release_name)
     
     stremio_subtitles = []
@@ -162,5 +167,4 @@ async def fetch_napi_proxy(v_hash: str):
 
 if __name__ == "__main__":
     import uvicorn
-    # Port 7000 dla lokalnych testów
     uvicorn.run(app, host="0.0.0.0", port=7000)
