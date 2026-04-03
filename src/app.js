@@ -10,6 +10,7 @@ const fs = require("fs")
 
 app.get("/", (req, res) => {
   // wczytaj index.html
+  console.log("__dirname:", __dirname)
   let html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8")
 
   // podmień %PUBLIC_URL% na wartość z config
@@ -20,7 +21,7 @@ app.get("/", (req, res) => {
   res.send(html)
 })
 
-app.use("/stremio", stremioRouter)
+app.use("/stremio", (req, res, next) => { req.url = req.url.replace(/^\/stremio/, ""), next() }, stremioRouter)
 app.get("/sub/:hash", async (req,res)=>{
   const txt = await getSubtitle(req.params.hash)
   if(!txt) return res.status(404).send("not found")
