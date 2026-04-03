@@ -54,7 +54,7 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.9",
+        "version": "1.0.10",
         "name": "NapiProjekt & OS PL",
         "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
@@ -106,6 +106,10 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
         
     all_subtitles = []
 
+    # Próbujemy wyciągnąć tytuł oryginalny (angielski)
+    original_title = movie_info.get("original_title", "")
+    polish_title = movie_info.get("title", "")
+
 # 5. NapiProjekt: Hash + Title (English & Polish)
     napi_results = []
     
@@ -117,16 +121,25 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
             "title": "󠀠[NAPI] Dopasowane (Hash) 🎯"
         })
     
-    # Próba 1: Oryginalny tytuł (największa szansa w Napi)
-    # Upewnij się, że movie_info["title"] to tytuł angielski
-    orig_title = movie_info.get("title", search_query) 
-    safe_orig = urllib.parse.quote(orig_title)
-    napi_results.append({
-        "id": f"napi_t_orig_{safe_orig}",
-        "url": f"{host_url}/fetch-napi-title/{safe_orig}.srt",
-        "lang": "pol",
-        "title": f"󠀠[NAPI] Szukaj: {orig_title} 🔍"
-    })
+    # Szukanie po tytule ORYGINALNYM (największa skuteczność)
+    if original_title:
+        safe_orig = urllib.parse.quote(original_title)
+        napi_results.append({
+            "id": f"napi_t_orig_{safe_orig}",
+            "url": f"{host_url}/fetch-napi-title/{safe_orig}.srt",
+            "lang": "pol",
+            "title": f"󠀠[NAPI] Szukaj: {original_title} 🔍"
+        })
+
+    # Szukanie po tytule POLSKIM (jako backup)
+    if polish_title:
+        safe_pl = urllib.parse.quote(polish_title)
+        napi_results.append({
+            "id": f"napi_t_pl_{safe_pl}",
+            "url": f"{host_url}/fetch-napi-title/{safe_pl}.srt",
+            "lang": "pol",
+            "title": f"󠀠[NAPI] Szukaj: {polish_title} 🔍"
+        })
     
     all_subtitles.extend(napi_results)
 
