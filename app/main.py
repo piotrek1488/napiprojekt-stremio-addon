@@ -54,9 +54,9 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.6",
+        "version": "1.0.7",
         "name": "NapiProjekt & OS PL",
-        "description": "Polskie napisy dopasowane po hashu z NapiProjekt (Fix 403) oraz OpenSubtitles.",
+        "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
         "types": ["movie", "series"],
         "resources": [
@@ -106,20 +106,29 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
         
     all_subtitles = []
 
-    # 5. PRÓBA 1: NapiProjekt po Hashu
+    # 5. NapiProjekt: Hash Match + Title Backup
+    napi_results = []
+    
+    # OPCJA A: Precyzyjna (po Hashu)
     if video_hash:
-        try:
-            # Teraz search_query już jest zdefiniowane wyżej!
-            napi_results = await scrape_napiprojekt(search_query, v_hash=video_hash, host_url=host_url)
-            
-            if napi_results:
-                print(f"✅ NapiProjekt: Znaleziono link proxy dla {video_hash}")
-                all_subtitles.extend(napi_results)
-            else:
-                print(f"ℹ️ NapiProjekt: Brak wyników dla hasha {video_hash}")
-                
-        except Exception as e:
-            print(f"❌ Błąd modułu NapiProjekt: {e}")
+        napi_results.append({
+            "id": f"napi_h_{video_hash}",
+            "url": f"{host_url}/fetch-napi/{video_hash}.srt",
+            "lang": "pol",
+            "title": "󠀠[NAPI] Dopasowane (Hash) 🎯"
+        })
+    
+    # OPCJA B: Szukanie po tytule (z TMDB/IMDB)
+    if search_query:
+        safe_title = urllib.parse.quote(search_query)
+        napi_results.append({
+            "id": f"napi_t_{safe_title}",
+            "url": f"{host_url}/fetch-napi-title/{safe_title}.srt",
+            "lang": "pol",
+            "title": f"󠀠[NAPI] Szukaj: {search_query} 🔍"
+        })
+    
+    all_subtitles.extend(napi_results)
 
     # 6. PRÓBA 2: OpenSubtitles (Fallback)
     try:
@@ -164,6 +173,25 @@ async def fetch_napi_proxy(v_hash: str):
             }
         )
     return Response(content="Nie znaleziono napisów lub błąd dekodowania.", status_code=404)
+
+@app.get("/fetch-napi-title/{title}.srt")
+async def fetch_napi_title_proxy(title: str):
+    decoded_title = urllib.parse.unquote(title)
+    print(f"📡 Proxy: Szukam napisów po tytule: {decoded_title}")
+    
+    # Wywołujemy decoder z parametrem title zamiast hash
+    subs_text = await get_napi_subtitles_text(title=decoded_title)
+    
+    if subs_text:
+        return Response(
+            content=subs_text,
+            media_type="text/plain",
+            headers={
+                "Content-Disposition": f"attachment; filename=napi_search.srt",
+                "Content-Type": "text/plain; charset=utf-8"
+            }
+        )
+    return Response(content="Nie znaleziono napisów dla tego tytułu.", status_code=404)
 
 if __name__ == "__main__":
     import uvicorn
