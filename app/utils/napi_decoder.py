@@ -21,10 +21,15 @@ async def get_napi_subtitles_text(v_hash: str = None, title: str = None):
             "the": "end"
         }
     elif title:
+        # Usuwamy rok (np. 2020) i zbędne znaki, zostawiamy sam tekst
+        import re
+        clean_title = re.sub(r'\s*\(\d{4}\)', '', title) # Usuwa (2020)
+        clean_title = re.sub(r'\s*\d{4}', '', clean_title) # Usuwa 2020
+        
         data = {
             "mode": "3",
             "client": "NapiProjekt",
-            "search_title": title,
+            "search_title": clean_title.strip(),
             "downloaded_subtitles_lang": "PL",
             "the": "end"
         }

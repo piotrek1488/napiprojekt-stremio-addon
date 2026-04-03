@@ -54,7 +54,7 @@ async def get_manifest(request: Request):
     
     return {
         "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.8",
+        "version": "1.0.9",
         "name": "NapiProjekt & OS PL",
         "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
         "logo": f"{protocol}://{host}/static/icon.png",
@@ -106,10 +106,9 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
         
     all_subtitles = []
 
-    # 5. NapiProjekt: Hash Match + Title Backup
+# 5. NapiProjekt: Hash + Title (English & Polish)
     napi_results = []
     
-    # OPCJA A: Precyzyjna (po Hashu)
     if video_hash:
         napi_results.append({
             "id": f"napi_h_{video_hash}",
@@ -118,15 +117,16 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
             "title": "󠀠[NAPI] Dopasowane (Hash) 🎯"
         })
     
-    # OPCJA B: Szukanie po tytule (z TMDB/IMDB)
-    if search_query:
-        safe_title = urllib.parse.quote(search_query)
-        napi_results.append({
-            "id": f"napi_t_{safe_title}",
-            "url": f"{host_url}/fetch-napi-title/{safe_title}.srt",
-            "lang": "pol",
-            "title": f"󠀠[NAPI] Szukaj: {search_query} 🔍"
-        })
+    # Próba 1: Oryginalny tytuł (największa szansa w Napi)
+    # Upewnij się, że movie_info["title"] to tytuł angielski
+    orig_title = movie_info.get("title", search_query) 
+    safe_orig = urllib.parse.quote(orig_title)
+    napi_results.append({
+        "id": f"napi_t_orig_{safe_orig}",
+        "url": f"{host_url}/fetch-napi-title/{safe_orig}.srt",
+        "lang": "pol",
+        "title": f"󠀠[NAPI] Szukaj: {orig_title} 🔍"
+    })
     
     all_subtitles.extend(napi_results)
 
