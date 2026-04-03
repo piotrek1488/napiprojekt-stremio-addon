@@ -30,7 +30,7 @@ if os.path.exists("static"):
 
 # --- FRONTEND ---
 
-@app.get("/", response_class=HTMLResponse)
+@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request):
     host = request.headers.get("host", "127.0.0.1:7000")
     try:
@@ -75,7 +75,9 @@ async def get_subtitles(type: str, id: str, extra: str = None):
     release_name = ""
 
     if extra:
-        parsed_extra = urllib.parse.parse_qs(extra)
+        # KLUCZOWA POPRAWKA: usuwamy .json z całego ciągu extra, zanim go przeparsujemy
+        clean_extra = extra.replace(".json", "")
+        parsed_extra = urllib.parse.parse_qs(clean_extra)
         if "videoHash" in parsed_extra:
             video_hash = parsed_extra["videoHash"][0]
             print(f"🔑 Znaleziono videoHash: {video_hash}")
