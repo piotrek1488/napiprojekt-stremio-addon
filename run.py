@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 if __name__ == "__main__":
-    port = int(os.getenv("PORT", 8000))
+    port = int(os.getenv("PORT", 7000))
     # Jeśli nie ma BASE_URL w .env, domyślnie używamy localhost
     base_url = os.getenv("BASE_URL", "127.0.0.1")
     
