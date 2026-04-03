@@ -7,18 +7,19 @@ const { validateConfig } = require("./config")
 validateConfig()
 const app = express()
 const fs = require("fs")
+const indexPath = path.resolve(__dirname, "public", "index.html")
 
 app.get("/", (req, res) => {
-  // wczytaj index.html
-  console.log("__dirname:", __dirname)
-  let html = fs.readFileSync(path.join(__dirname, "public", "index.html"), "utf8")
-
-  // podmień %PUBLIC_URL% na wartość z config
-  html = html
-    .replace(/%PUBLIC_URL%/g, PUBLIC_URL)
-    .replace(/%STREMIO_URL%/g, STREMIO_URL)
-
-  res.send(html)
+  try {
+    let html = fs.readFileSync(indexPath, "utf8")
+    html = html
+      .replace(/%PUBLIC_URL%/g, PUBLIC_URL)
+      .replace(/%STREMIO_URL%/g, STREMIO_URL)
+    res.send(html)
+  } catch (err) {
+    console.error("Błąd wczytywania index.html:", err)
+    res.status(500).send("Error loading page")
+  }
 })
 
 app.use("/stremio", (req, res, next) => { req.url = req.url.replace(/^\/stremio/, ""), next() }, stremioRouter)
