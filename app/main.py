@@ -35,6 +35,11 @@ app.add_middleware(
 if os.path.exists("static"):
     app.mount("/static", StaticFiles(directory="static"), name="static")
 
+def mask_token(token: str, show=4) -> str:
+    if not token or len(token) <= show * 2:
+        return "*" * len(token)
+    return f"{token[:show]}{'*' * (len(token)-show*2)}{token[-show:]}"
+
 @app.get("/version")
 async def version():
     try:
@@ -77,7 +82,7 @@ async def get_manifest(request: Request):
         protocol = "https" if "onrender.com" in host else "http"
         base = f"{protocol}://{host}"
 
-        print("📦 Manifest request | token:", rd_token[:5] if rd_token else "NONE")
+        print("📦 Manifest request | token:", mask_token(rd_token)) if rd_token else print("📦 Manifest request | token: NONE")
 
         return {
             "id": "org.stremio.addon.napiprojekt",
@@ -290,7 +295,8 @@ async def fetch_napi_proxy(v_hash: str):
 
 @app.get("/fetch-napi-title/{title}.srt")
 async def fetch_napi_title_proxy(title: str):
-    decoded_title = urllib.parse.unquote(title, encoding="utf-8", errors="replace")
+    decoded_title = urllib.parse.unquote(title, encoding="utf-8")
+    decoded_title = unicodedata.normalize("NFC", decoded_title)
     print(f"📡 Proxy: Szukam napisów po tytule: {decoded_title}")
     
     # Wywołujemy decoder z parametrem title zamiast hash
