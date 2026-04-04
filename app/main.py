@@ -48,6 +48,8 @@ async def index(request: Request):
     host = request.headers.get("host", "127.0.0.1:7000")
     protocol = "https" if "onrender.com" in host else "http"
     full_url = f"{protocol}://{host}"
+    rd_token = request.query_params.get("rd_token") or ""
+    os_api_key = request.query_params.get("os_api_key") or ""
     try:
         with open("static/index.html", "r", encoding="utf-8") as f:
             content = f.read()
