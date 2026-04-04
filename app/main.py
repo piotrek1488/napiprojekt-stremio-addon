@@ -13,6 +13,7 @@ from app.utils.scoring import score_subtitles
 from app.cache import subtitle_cache
 from app.utils.tmdb import get_movie_details
 from app.utils.napi_decoder import get_napi_subtitles_text
+from app.utils.rd_napi import get_napi_from_rd
 
 load_dotenv()
 
@@ -49,6 +50,7 @@ async def index(request: Request):
 
 @app.get("/manifest.json")
 async def get_manifest(request: Request):
+    rd_token = request.query_params.get("rd_token", "")
     host = request.headers.get("host", "127.0.0.1:7000")
     protocol = "https" if "onrender.com" in host else "http"
     
@@ -57,7 +59,7 @@ async def get_manifest(request: Request):
         "version": "1.0.11",
         "name": "NapiProjekt & OS PL",
         "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
-        "logo": f"{protocol}://{host}/static/icon.png",
+        "logo": f"{base}/static/icon.png",
         "types": ["movie", "series"],
         "resources": [
             {
@@ -66,7 +68,16 @@ async def get_manifest(request: Request):
                 "id_prefixes": ["tt"]
             }
         ],
-        "catalogs": []
+        "catalogs": [],
+        "behaviorHints": {
+            "configurable": True
+        },
+        "endpoints": [
+            {
+                "type": "subtitles",
+                "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={rd_token}"
+            }
+        ]
     }
 
 # --- GŁÓWNY ENDPOINT NAPISÓW ---
@@ -74,6 +85,11 @@ async def get_manifest(request: Request):
 @app.get("/subtitles/{type}/{id}/{extra:path}")
 @app.get("/subtitles/{type}/{id}.json")
 async def get_subtitles(type: str, id: str, request: Request, extra: str = None):
+    rd_token = request.query_params.get("rd_token")
+    if rd_token:
+        print("🔑 RD token detected")
+    if not rd_token:
+        return {"subtitles": []}
     # 1. Przygotowanie ID i hosta
     clean_id = id.replace(".json", "")
     imdb_id = clean_id.split(":")[0] if ":" in clean_id else clean_id
@@ -81,6 +97,7 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     
     video_hash = ""
     release_name = ""
+    video_size = ""
 
     # 2. Wyciąganie hasha i nazwy pliku
     if extra:
@@ -89,6 +106,9 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
             parsed = urllib.parse.parse_qs(clean_extra)
             video_hash = parsed.get("videoHash", [""])[0]
             release_name = parsed.get("filename", [""])[0]
+        if "videoSize=" in clean_extra:
+            parsed = urllib.parse.parse_qs(clean_extra)
+            video_size = parsed.get("videoSize", [""])[0]
     
     print(f"🎬 Zapytanie: {imdb_id} | Hash: {video_hash}")
 
@@ -109,6 +129,29 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     # Próbujemy wyciągnąć tytuł oryginalny (angielski)
     original_title = movie_info.get("original_title", "")
     polish_title = movie_info.get("title", "")
+
+    # --- NOWY BLOK: Real-Debrid + Napi ---
+    if rd_token and video_size:
+        print("⚡ RD: szukam pliku po size:", video_size)
+
+        try:
+            napi_text = get_napi_from_rd(rd_token, video_size)
+
+            if napi_text:
+                print("✅ Napi znalezione przez RD!")
+
+                return {
+                    "subtitles": [
+                        {
+                            "id": "napi_rd",
+                            "url": f"{host_url}/rd-napi.srt?rd_token={rd_token}&video_size={video_size}",
+                            "lang": "pol",
+                            "title": "[NAPI] Dopasowane (Real-Debrid) 🚀"
+                        }
+                    ]
+                }
+        except Exception as e:
+            print("❌ RD/Napi error:", e)
 
 # 5. NapiProjekt: Hash + Title (English & Polish)
     napi_results = []
@@ -205,6 +248,25 @@ async def fetch_napi_title_proxy(title: str):
             }
         )
     return Response(content="Nie znaleziono napisów dla tego tytułu.", status_code=404)
+
+@app.get("/rd-napi.srt")
+async def rd_napi(request: Request):
+    rd_token = request.query_params.get("rd_token")
+    video_size = request.query_params.get("video_size")
+
+    if not rd_token or not video_size:
+        return Response(content="Brak danych", status_code=400)
+
+    subs = get_napi_from_rd(rd_token, video_size)
+
+    if subs:
+        return Response(
+            content=subs,
+            media_type="text/plain",
+            headers={"Content-Type": "text/plain; charset=utf-8"}
+        )
+
+    return Response(content="Brak napisów", status_code=404)
 
 if __name__ == "__main__":
     import uvicorn

@@ -73,6 +73,8 @@
       text-decoration: none;
       font-weight: 600;
       transition: 0.2s;
+      margin-top: 20px;
+      margin-bottom: 20px;
     }
 
     .btn-green {
@@ -176,22 +178,38 @@
       Automatyczne wczytywanie polskich napisów do filmów i&nbsp;seriali z&nbsp;<a href="https://www.napiprojekt.pl">Napiprojekt.pl</a> w&nbsp;<a href="https://web.strem.io">Stremio</a>.
       Bez konfiguracji, działa od razu po instalacji.
     </div>
-
-    <div class="buttons">
-      <a href="{stremio_url}" class="btn btn-green">
-        <i class="fa-solid fa-download"></i>
-        Instaluj (App)
-      </a>
-
-      <a href="https://web.strem.io/#/addons?addon={public_url}/manifest.json" class="btn btn-green">
-        <i class="fa-solid fa-download"></i>
-        Instaluj (Web)
-      </a>
+    <div style="margin-top:30px; max-width:600px; width:100%;margin-bottom:30px;">
+      <input id="rdToken" class="file-input" type="text" placeholder="Wklej swój Real-Debrid API token">
+      <p style="margin-top:10px; font-size:13px; color:#aaa;">
+        Token znajdziesz tutaj:
+        <a href="https://real-debrid.com/apitoken" target="_blank">real-debrid.com/apitoken</a>
+      </p>
+      <div style="margin-top:15px;">
+        <button onclick="generateLink()" class="btn btn-green">
+          <i class="fa-solid fa-gear"></i>
+          Generuj link
+        </button>
+      </div>
     </div>
 
-    <div class="file-path">
-      <p>Pełna ścieżka do <span style="font-style: italic;">manifest.json</span>:</p><br>
-      <p><input class="file-input" type="text" value="{public_url}/manifest.json" readonly></p>
+    <div id="generated" class="file-path" style="display:none; text-align:center;">
+      <p>Twój spersonalizowany manifest:</p><br>
+
+      <input id="generatedLink" class="file-input" readonly>
+
+      <div class="buttons">
+        
+        <a id="installApp" class="btn btn-green">
+          <i class="fa-solid fa-download"></i>
+          Instaluj (App)
+        </a>
+
+        <a id="installWeb" class="btn btn-green">
+          <i class="fa-solid fa-download"></i>
+          Instaluj (Web)
+        </a>
+
+      </div>
     </div>
   </div>
 
@@ -201,6 +219,30 @@
       <i class="fab fa-github"></i>
     </a>
   </footer>
+<script>
+function generateLink() {
+  const token = document.getElementById("rdToken").value.trim();
 
+  if (!token) {
+    alert("Wklej token Real-Debrid");
+    return;
+  }
+
+  const base = "{public_url}";
+  const manifestUrl = `${base}/manifest.json?rd_token=${token}`;
+
+  // link dla Web Stremio
+  const webUrl = `https://web.strem.io/#/addons?addon=${encodeURIComponent(manifestUrl)}`;
+
+  // link dla App (deep link)
+  const appUrl = `stremio://${manifestUrl}`;
+
+  document.getElementById("generated").style.display = "block";
+  document.getElementById("generatedLink").value = manifestUrl;
+
+  document.getElementById("installWeb").href = webUrl;
+  document.getElementById("installApp").href = appUrl;
+}
+</script>
 </body>
 </html>
