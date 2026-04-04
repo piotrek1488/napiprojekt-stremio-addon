@@ -1,5 +1,6 @@
 import urllib.parse
 import os
+import traceback
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -50,35 +51,44 @@ async def index(request: Request):
 
 @app.get("/manifest.json")
 async def get_manifest(request: Request):
-    rd_token = request.query_params.get("rd_token", "")
-    host = request.headers.get("host", "127.0.0.1:7000")
-    protocol = "https" if "onrender.com" in host else "http"
-    
-    return {
-        "id": "org.stremio.addon.napiprojekt.v2",
-        "version": "1.0.11",
-        "name": "NapiProjekt & OS PL",
-        "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
-        "logo": f"{base}/static/icon.png",
-        "types": ["movie", "series"],
-        "resources": [
-            {
-                "name": "subtitles",
-                "types": ["movie", "series"],
-                "id_prefixes": ["tt"]
-            }
-        ],
-        "catalogs": [],
-        "behaviorHints": {
-            "configurable": True
-        },
-        "endpoints": [
-            {
-                "type": "subtitles",
-                "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={rd_token}"
-            }
-        ]
-    }
+    try:
+        rd_token = request.query_params.get("rd_token") or ""
+
+        host = request.headers.get("host", "127.0.0.1:7000")
+        protocol = "https" if "onrender.com" in host else "http"
+        base = f"{protocol}://{host}"
+
+        print("📦 Manifest request | token:", rd_token[:5] if rd_token else "NONE")
+
+        return {
+            "id": "org.stremio.addon.napiprojekt",
+            "version": "1.0.13",
+            "name": "NapiProjekt & OS PL",
+            "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
+            "logo": f"{base}/static/icon.png",
+            "types": ["movie", "series"],
+            "resources": [
+                {
+                    "name": "subtitles",
+                    "types": ["movie", "series"],
+                    "idPrefixes": ["tt"]
+                }
+            ],
+            "catalogs": [],
+            "behaviorHints": {
+                "configurable": True
+            },
+            "endpoints": [
+                {
+                    "type": "subtitles",
+                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={rd_token}"
+                }
+            ]
+        }
+
+    except Exception as e:
+        traceback.print_exc()
+        return {"error": "manifest failed"}
 
 # --- GŁÓWNY ENDPOINT NAPISÓW ---
 
