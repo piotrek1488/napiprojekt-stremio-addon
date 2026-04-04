@@ -97,7 +97,7 @@ async def get_manifest(request: Request):
             "endpoints": [
                 {
                     "type": "subtitles",
-                    "url": f"{base}/subtitles/{type}/{id}.json?rd_token={rd_token}&os_api_key={os_api_key}"
+                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={rd_token}&os_api_key={os_api_key}"
                 }
             ]
         }
