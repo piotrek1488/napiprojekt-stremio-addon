@@ -194,75 +194,75 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
         search_queries.append(polish_title)
 
     # --- NOWY BLOK: Real-Debrid + Napi ---
+    # --- PRZETWARZANIE NAPISÓW ---
+
+    # 1️⃣ NAPI RD (Real-Debrid)
     if rd_token and video_size:
         print("⚡ RD: szukam pliku po size:", video_size)
-
         try:
             napi_text = get_napi_from_rd(rd_token, video_size)
-
             if napi_text:
                 print("✅ Napi znalezione przez RD!")
-
-                return {
-                    "subtitles": [
-                        {
-                            "id": "napi_rd",
-                            "url": f"{host_url}/rd-napi.srt?rd_token={rd_token}&video_size={video_size}",
-                            "lang": "pol",
-                            "title": "[NAPI] Dopasowane (Real-Debrid) 🚀"
-                        }
-                    ]
-                }
+                all_subtitles.append({
+                    "id": "napi_rd",
+                    "url": f"{host_url}/rd-napi.srt?rd_token={rd_token}&video_size={video_size}",
+                    "lang": "pol",
+                    "title": "[NAPI] Dopasowane (Real-Debrid) 🚀"
+                })
         except Exception as e:
             print("❌ RD/Napi error:", e)
 
-# 5. NapiProjekt: Hash + Title (English & Polish)
+    # 2️⃣ NAPI hash/title
     napi_results = []
-    
+
     if video_hash:
         napi_results.append({
             "id": f"napi_h_{video_hash}",
             "url": f"{host_url}/fetch-napi/{video_hash}.srt",
             "lang": "pol",
-            "title": "󠀠[NAPI] Dopasowane (Hash) 🎯"
+            "title": "[NAPI] Dopasowane (Hash) 🎯"
         })
-    
-    # NOWE: loop po wszystkich fallbackach
-    for query in search_queries:
-        safe_query = urllib.parse.quote(query)
+
+    if original_title:
+        safe_orig = urllib.parse.quote(original_title)
         napi_results.append({
-            "id": f"napi_t_{safe_query}",
-            "url": f"{host_url}/fetch-napi-title/{safe_query}.srt",
+            "id": f"napi_t_orig_{safe_orig}",
+            "url": f"{host_url}/fetch-napi-title/{safe_orig}.srt",
             "lang": "pol",
-            "title": f"[NAPI] Szukaj: {query} 🔍"
+            "title": f"[NAPI] Szukaj: {original_title} 🔍"
         })
-        
+
+    if polish_title and polish_title != original_title:
+        safe_pl = urllib.parse.quote(polish_title)
+        napi_results.append({
+            "id": f"napi_t_pl_{safe_pl}",
+            "url": f"{host_url}/fetch-napi-title/{safe_pl}.srt",
+            "lang": "pol",
+            "title": f"[NAPI] Szukaj: {polish_title} 🔍"
+        })
+
+    # Dodajemy tylko te, które są dostępne (przy 404 Stremio nie pokazuje błędów)
     all_subtitles.extend(napi_results)
 
-    # 6. PRÓBA 2: OpenSubtitles (Fallback)
+    # 3️⃣ OpenSubtitles fallback
     if os_api_key:
         try:
             os_results = await search_opensubtitles(imdb_id, os_api_key)
-            all_subtitles.extend(os_results)
+            for sub in os_results:
+                # Normalizacja tytułu w Stremio
+                all_subtitles.append({
+                    "id": sub["id"],
+                    "url": sub["url"],
+                    "lang": "pol",
+                    "title": f"[OS] {sub.get('releaseName', 'Unknown')}"
+                })
+            print(f"✅ OpenSubtitles: znaleziono {len(os_results)} napisów")
         except Exception as e:
             print(f"❌ Błąd OpenSubtitles: {e}")
 
-    # 7. Scoring i Formatowanie
-    print("📊 ALL SUBS:", all_subtitles)
-    print("🎞 release_name:", release_name)
-    scored = score_subtitles(all_subtitles, release_name)
-    
-    stremio_subtitles = []
-    # for sub in scored:
-    for sub in all_subtitles:
-        stremio_subtitles.append({
-            "id": sub["id"],
-            "url": sub["url"],
-            "lang": "pol",
-            "title": f"[{sub.get('source', 'OS')}] {sub.get('releaseName', 'Unknown')}"
-            # "title": f"[{sub.get('source', 'N/A')}] {sub.get('releaseName', 'Unknown')} ({sub.get('score', 0)}%)"
-        })
-        
+    # 4️⃣ Scoring + cache
+    stremio_subtitles = score_subtitles(all_subtitles, release_name)
+
     subtitle_cache[cache_key] = stremio_subtitles
     return {"subtitles": stremio_subtitles}
 
