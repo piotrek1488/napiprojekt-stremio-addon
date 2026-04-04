@@ -1,6 +1,7 @@
 import urllib.parse
 import os
 import traceback
+import unicodedata
 from fastapi import FastAPI, Request, Response
 from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
