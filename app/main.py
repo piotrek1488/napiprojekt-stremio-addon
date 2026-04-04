@@ -6,6 +6,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
+from fastapi.responses import PlainTextResponse
 
 # Importy Twoich modułów
 from app.providers.napiprojekt import scrape_napiprojekt, fetch_by_hash
@@ -17,6 +18,8 @@ from app.utils.napi_decoder import get_napi_subtitles_text
 from app.utils.rd_napi import get_napi_from_rd
 
 load_dotenv()
+with open("version", "r") as f:
+    app_version = f.read().strip()
 
 app = FastAPI()
 
@@ -28,10 +31,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-if os.path.exists("static"):
-    app.mount("/static", StaticFiles(directory="static"), name="static")
-
 # --- FRONTEND ---
+
+@app.get("/version")
+async def version():
+    try:
+        with open("version", "r") as f:
+            content = f.read().strip()
+        return PlainTextResponse(content)
+    except FileNotFoundError:
+        return PlainTextResponse("Plik version nie istnieje", status_code=404)
 
 @app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request):
@@ -43,6 +52,8 @@ async def index(request: Request):
             content = f.read()
         rendered_content = content.replace("{public_url}", full_url)
         rendered_content = rendered_content.replace("{stremio_url}", f"stremio://{host}/manifest.json")
+        # Zamiana placeholdera {app_version} na faktyczną wersję
+        rendered_content = content.replace("{version_placeholder}", app_version)
         return HTMLResponse(content=rendered_content)
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Błąd: Plik static/index.html nie istnieje!</h1>", status_code=404)
@@ -62,7 +73,7 @@ async def get_manifest(request: Request):
 
         return {
             "id": "org.stremio.addon.napiprojekt",
-            "version": "1.0.13",
+            "version": f"{app_version}",
             "name": "NapiProjekt & OS PL",
             "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
             "logo": f"{base}/static/icon.png",
@@ -78,10 +89,18 @@ async def get_manifest(request: Request):
             "behaviorHints": {
                 "configurable": True
             },
+            "config": [
+            {
+                "id": "os_api_key",
+                "name": "OpenSubtitles API Key",
+                "type": "string",
+                "description": "Twój klucz API do OpenSubtitles. Wymagany do fallbacku."
+            }
+        ],
             "endpoints": [
                 {
                     "type": "subtitles",
-                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={rd_token}"
+                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={{rd_token}}&os_api_key={{os_api_key}}"
                 }
             ]
         }
@@ -95,6 +114,7 @@ async def get_manifest(request: Request):
 @app.get("/subtitles/{type}/{id}/{extra:path}")
 @app.get("/subtitles/{type}/{id}.json")
 async def get_subtitles(type: str, id: str, request: Request, extra: str = None):
+    os_api_key = request.query_params.get("os_api_key")
     rd_token = request.query_params.get("rd_token")
     if rd_token:
         print("🔑 RD token detected")
@@ -197,11 +217,12 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     all_subtitles.extend(napi_results)
 
     # 6. PRÓBA 2: OpenSubtitles (Fallback)
-    try:
-        os_results = await search_opensubtitles(imdb_id)
-        all_subtitles.extend(os_results)
-    except Exception as e:
-        print(f"❌ Błąd OpenSubtitles: {e}")
+    if os_api_key:
+        try:
+            os_results = await search_opensubtitles(imdb_id, os_api_key)
+            all_subtitles.extend(os_results)
+        except Exception as e:
+            print(f"❌ Błąd OpenSubtitles: {e}")
 
     # 7. Scoring i Formatowanie
     scored = score_subtitles(all_subtitles, release_name)

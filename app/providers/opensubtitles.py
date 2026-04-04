@@ -1,15 +1,15 @@
 import httpx
 
-async def search_opensubtitles(imdb_id: str):
+async def search_opensubtitles(imdb_id: str, os_api_key: str):
     # Usuwamy 'tt', bo API OS czasami woli same cyfry
     numeric_id = imdb_id.replace("tt", "")
     print(f"📡 Zapytanie do OpenSubtitles dla ID: {numeric_id}")
     
-    url = f"https://rest.opensubtitles.org/search/imdbid-{numeric_id}/sublanguageid-pol"
+    url = f"https://api.opensubtitles.com/api/v1/subtitles?imdb_id={numeric_id}&languages=pol"
     
     headers = {
-        "User-Agent": "StremioPolishAddon v1", # Musi być cokolwiek unikalnego
-        "X-User-Agent": "StremioPolishAddon v1"
+        "Api-Key": os_api_key,
+        "User-Agent": "StremioPolishAddon"
     }
 
     try:
@@ -19,20 +19,18 @@ async def search_opensubtitles(imdb_id: str):
             if response.status_code == 200:
                 data = response.json()
                 # LOGOWANIE SUROWYCH DANYCH - zobaczysz to w logach Rendera
-                print(f"DEBUG OS: Odebrano {len(data)} elementów z API")
+                print(f"DEBUG OS: Odebrano {len(data.get('data', []))} elementów z API")
                 
                 results = []
-                for item in data[:10]: # Bierzemy do 10 wyników
-                    download_link = item.get("SubDownloadLink")
+                for item in data.get("data", [])[:10]:  # Bierzemy do 10 wyników
+                    attributes = item.get("attributes", {})
+                    download_link = attributes.get("url")
                     if download_link:
-                        # Zamiana na .srt omija problemy z rozpakowywaniem .gz
-                        final_url = download_link.replace(".gz", ".srt")
-                        
                         results.append({
-                            "id": f"os_{item.get('IDSubtitle')}",
-                            "url": final_url,
+                            "id": f"os_{item.get('id')}",
+                            "url": download_link,
                             "lang": "pol",
-                            "releaseName": item.get("MovieReleaseName") or "OpenSubtitles",
+                            "releaseName": attributes.get("release") or "OpenSubtitles",
                             "source": "OpenSubtitles"
                         })
                 

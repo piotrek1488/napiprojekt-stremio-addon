@@ -214,7 +214,7 @@
   </div>
 
   <footer>
-    © 2026 Napiprojekt Stremio Addon
+    © 2026 Napiprojekt Stremio Addon v{version_placeholder}</span>
     <a href="https://github.com/piotrek1488/napiprojekt-stremio-addon/tree/gemini" target="_blank" class="github">
       <i class="fab fa-github"></i>
     </a>
@@ -244,5 +244,17 @@ function generateLink() {
   document.getElementById("installApp").href = appUrl;
 }
 </script>
+    <!-- <script>
+        // Pobieramy plik version.txt z serwera
+        fetch('/version')
+            .then(response => response.text())   // czytamy jako tekst
+            .then(text => {
+                document.getElementById('version').textContent = text.trim();
+            })
+            .catch(err => {
+                console.error('Błąd przy pobieraniu wersji:', err);
+                document.getElementById('version').textContent = "Nie udało się pobrać wersji";
+            });
+    </script> -->
 </body>
 </html>
