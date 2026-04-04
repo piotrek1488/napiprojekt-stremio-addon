@@ -42,7 +42,6 @@ async def version():
     except FileNotFoundError:
         return PlainTextResponse("Plik version nie istnieje", status_code=404)
 
-@app.api_route("/", methods=["GET", "HEAD"], response_class=HTMLResponse)
 async def index(request: Request):
     host = request.headers.get("host", "127.0.0.1:7000")
     protocol = "https" if "onrender.com" in host else "http"
@@ -53,10 +52,12 @@ async def index(request: Request):
         rendered_content = content.replace("{public_url}", full_url)
         rendered_content = rendered_content.replace("{stremio_url}", f"stremio://{host}/manifest.json")
         # Zamiana placeholdera {app_version} na faktyczną wersję
-        rendered_content = content.replace("{version_placeholder}", app_version)
+        rendered_content = rendered_content.replace("{version_placeholder}", app_version)
         return HTMLResponse(content=rendered_content)
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Błąd: Plik static/index.html nie istnieje!</h1>", status_code=404)
+app.add_api_route("/", index, methods=["GET", "HEAD"])
+app.add_api_route("/configure", index, methods=["GET", "HEAD"])
 
 # --- STREMIO MANIFEST ---
 
@@ -64,6 +65,7 @@ async def index(request: Request):
 async def get_manifest(request: Request):
     try:
         rd_token = request.query_params.get("rd_token") or ""
+        os_api_key = request.query_params.get("os_api_key") or ""
 
         host = request.headers.get("host", "127.0.0.1:7000")
         protocol = "https" if "onrender.com" in host else "http"
@@ -93,7 +95,7 @@ async def get_manifest(request: Request):
             "endpoints": [
                 {
                     "type": "subtitles",
-                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={{rd_token}}&os_api_key={{os_api_key}}"
+                    "url": f"{base}/subtitles/{type}/{id}.json?rd_token={rd_token}&os_api_key={os_api_key}"
                 }
             ]
         }
