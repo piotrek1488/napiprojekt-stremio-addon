@@ -164,6 +164,7 @@
       outline: none;
       user-select: all;
       text-align: center;
+      margin-top: 10px;
     }
   </style>
 </head>
@@ -176,14 +177,20 @@
 
     <div class="description">
       Automatyczne wczytywanie polskich napisów do filmów i&nbsp;seriali z&nbsp;<a href="https://www.napiprojekt.pl">Napiprojekt.pl</a> w&nbsp;<a href="https://web.strem.io">Stremio</a>.
-      Bez konfiguracji, działa od razu po instalacji.
     </div>
     <div style="margin-top:30px; max-width:600px; width:100%;margin-bottom:30px;">
       <input id="rdToken" class="file-input" type="text" placeholder="Wklej swój Real-Debrid API token">
-      <p style="margin-top:10px; font-size:13px; color:#aaa;">
-        Token znajdziesz tutaj:
+      <p style="margin-top:10px; margin-bottom:20px; font-size:13px; color:#aaa;">
+        Token Real-Debrid znajdziesz tutaj:
         <a href="https://real-debrid.com/apitoken" target="_blank">real-debrid.com/apitoken</a>
       </p>
+      <input id="osToken" class="file-input" type="text" placeholder="Wklej swój OpenSubtitles API token">
+      <p style="margin-top:10px; margin-bottom:20px; font-size:13px; color:#aaa;">
+        Token OpenSubtitles znajdziesz tutaj:
+        <a href="https://www.opensubtitles.com/pl/consumers" target="_blank">opensubtitles.com/pl/consumers</a>
+      </p>
+
+
       <div style="margin-top:15px;">
         <button onclick="generateLink()" class="btn btn-green">
           <i class="fa-solid fa-gear"></i>
@@ -221,15 +228,22 @@
   </footer>
 <script>
 function generateLink() {
-  const token = document.getElementById("rdToken").value.trim();
-
-  if (!token) {
+  const rdInput  = document.getElementById("rdToken").value.trim();
+  const osInput = document.getElementById("osToken").value.trim();
+  let manifestUrl = "";
+  if (!rdInput) {
     alert("Wklej token Real-Debrid");
+    return;
+  }
+    if (!osInput) {
+    alert("Wklej token Open-Subtitles");
     return;
   }
 
   const base = "{public_url}";
-  const manifestUrl = `${base}/manifest.json?rd_token=${token}`;
+  if (rdInput && osInput) {
+    manifestUrl = `${base}/manifest.json?rd_token=${rdInput}&os_api_key=${osInput}`;
+  }
 
   // link dla Web Stremio
   const webUrl = `https://web.strem.io/#/addons?addon=${encodeURIComponent(manifestUrl)}`;

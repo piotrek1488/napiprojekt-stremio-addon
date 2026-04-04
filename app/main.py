@@ -89,14 +89,7 @@ async def get_manifest(request: Request):
             "behaviorHints": {
                 "configurable": True
             },
-            "config": [
-            {
-                "id": "os_api_key",
-                "name": "OpenSubtitles API Key",
-                "type": "string",
-                "description": "Twój klucz API do OpenSubtitles. Wymagany do fallbacku."
-            }
-        ],
+            "config": [],
             "endpoints": [
                 {
                     "type": "subtitles",
