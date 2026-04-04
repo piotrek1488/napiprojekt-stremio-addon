@@ -176,6 +176,23 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     original_title = movie_info.get("original_title", "")
     polish_title = movie_info.get("title", "")
 
+    # NOWE: rok z TMDB
+    year = ""
+    if movie_info and movie_info.get("release_date"):
+        year = movie_info["release_date"][:4]
+
+    # NOWE: fallback queries
+    search_queries = []
+
+    if original_title:
+        search_queries.append(original_title)
+
+    if original_title and year:
+        search_queries.append(f"{original_title} {year}")
+
+    if polish_title and polish_title != original_title:
+        search_queries.append(polish_title)
+
     # --- NOWY BLOK: Real-Debrid + Napi ---
     if rd_token and video_size:
         print("⚡ RD: szukam pliku po size:", video_size)
@@ -210,26 +227,16 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
             "title": "󠀠[NAPI] Dopasowane (Hash) 🎯"
         })
     
-    # Szukanie po tytule ORYGINALNYM (największa skuteczność)
-    if original_title:
-        safe_orig = urllib.parse.quote(original_title)
+    # NOWE: loop po wszystkich fallbackach
+    for query in search_queries:
+        safe_query = urllib.parse.quote(query)
         napi_results.append({
-            "id": f"napi_t_orig_{safe_orig}",
-            "url": f"{host_url}/fetch-napi-title/{safe_orig}.srt",
+            "id": f"napi_t_{safe_query}",
+            "url": f"{host_url}/fetch-napi-title/{safe_query}.srt",
             "lang": "pol",
-            "title": f"󠀠[NAPI] Szukaj: {original_title} 🔍"
+            "title": f"[NAPI] Szukaj: {query} 🔍"
         })
-
-    # Szukanie po tytule POLSKIM (jako backup)
-    if polish_title and polish_title != original_title:
-        safe_pl = urllib.parse.quote(polish_title)
-        napi_results.append({
-            "id": f"napi_t_pl_{safe_pl}",
-            "url": f"{host_url}/fetch-napi-title/{safe_pl}.srt",
-            "lang": "pol",
-            "title": f"󠀠[NAPI] Szukaj: {polish_title} 🔍"
-        })
-    
+        
     all_subtitles.extend(napi_results)
 
     # 6. PRÓBA 2: OpenSubtitles (Fallback)
@@ -279,7 +286,7 @@ async def fetch_napi_proxy(v_hash: str):
 
 @app.get("/fetch-napi-title/{title}.srt")
 async def fetch_napi_title_proxy(title: str):
-    decoded_title = urllib.parse.unquote(title)
+    decoded_title = urllib.parse.unquote(title, encoding="utf-8", errors="replace")
     print(f"📡 Proxy: Szukam napisów po tytule: {decoded_title}")
     
     # Wywołujemy decoder z parametrem title zamiast hash

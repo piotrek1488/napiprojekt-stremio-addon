@@ -2,10 +2,11 @@ import httpx
 
 async def search_opensubtitles(imdb_id: str, os_api_key: str):
     # Usuwamy 'tt', bo API OS czasami woli same cyfry
-    numeric_id = imdb_id.replace("tt", "")
-    print(f"📡 Zapytanie do OpenSubtitles dla ID: {numeric_id}")
+    # numeric_id = imdb_id.replace("tt", "")
+    print(f"📡 Zapytanie do OpenSubtitles dla ID: {imdb_id}")
     
-    url = f"https://api.opensubtitles.com/api/v1/subtitles?imdb_id={numeric_id}&languages=pol"
+    # url = f"https://api.opensubtitles.com/api/v1/subtitles?imdb_id={numeric_id}&languages=pol"
+    url = f"https://api.opensubtitles.com/api/v1/subtitles?imdb_id={imdb_id}&languages=pl"
     
     headers = {
         "Api-Key": os_api_key,
