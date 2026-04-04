@@ -32,6 +32,8 @@ app.add_middleware(
 )
 
 # --- FRONTEND ---
+if os.path.exists("static"):
+    app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/version")
 async def version():
