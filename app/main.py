@@ -93,11 +93,26 @@ async def get_manifest(request: Request):
             "behaviorHints": {
                 "configurable": True
             },
-            "config": [],
+            "config": [
+                {
+                    "name": "rd_token",
+                    "type": "string",
+                    "title": "Real-Debrid Token",
+                    "description": "Twój token Real-Debrid",
+                    "default": ""
+                },
+                {
+                    "name": "os_api_key",
+                    "type": "string",
+                    "title": "OpenSubtitles API Key",
+                    "description": "Twój klucz API do OpenSubtitles",
+                    "default": ""
+                }
+            ],
             "endpoints": [
                 {
                     "type": "subtitles",
-                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={rd_token}&os_api_key={os_api_key}"
+                    "url": f"{base}/subtitles/{{type}}/{{id}}.json?rd_token={{rd_token}}&os_api_key={{os_api_key}}"
                 }
             ]
         }
