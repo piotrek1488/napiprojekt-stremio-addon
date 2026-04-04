@@ -57,6 +57,8 @@ async def index(request: Request):
         rendered_content = rendered_content.replace("{stremio_url}", f"stremio://{host}/manifest.json")
         # Zamiana placeholdera {app_version} na faktyczną wersję
         rendered_content = rendered_content.replace("{version_placeholder}", app_version)
+        rendered_content = rendered_content.replace("{rd_token_prefill}", rd_token)
+        rendered_content = rendered_content.replace("{os_api_key_prefill}", os_api_key)
         return HTMLResponse(content=rendered_content)
     except FileNotFoundError:
         return HTMLResponse(content="<h1>Błąd: Plik static/index.html nie istnieje!</h1>", status_code=404)
@@ -80,7 +82,7 @@ async def get_manifest(request: Request):
         return {
             "id": "org.stremio.addon.napiprojekt",
             "version": f"{app_version}",
-            "name": "NapiProjekt & OS PL",
+            "name": "NapiProjekt Addon",
             "description": "Polskie napisy z NapiProjekt oraz OpenSubtitles.",
             "logo": f"{base}/static/icon.png",
             "types": ["movie", "series"],

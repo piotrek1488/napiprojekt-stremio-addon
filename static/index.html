@@ -258,6 +258,12 @@ function generateLink() {
   document.getElementById("installApp").href = appUrl;
 }
 </script>
+<script>
+const params = new URLSearchParams(window.location.search);
+
+document.getElementById("rdToken").value = params.get("rd_token") || "";
+document.getElementById("osToken").value = params.get("os_api_key") || "";
+</script>
     <!-- <script>
         // Pobieramy plik version.txt z serwera
         fetch('/version')
