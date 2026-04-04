@@ -248,15 +248,19 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
             print(f"❌ Błąd OpenSubtitles: {e}")
 
     # 7. Scoring i Formatowanie
+    print("📊 ALL SUBS:", all_subtitles)
+    print("🎞 release_name:", release_name)
     scored = score_subtitles(all_subtitles, release_name)
     
     stremio_subtitles = []
-    for sub in scored:
+    # for sub in scored:
+    for sub in all_subtitles:
         stremio_subtitles.append({
             "id": sub["id"],
             "url": sub["url"],
             "lang": "pol",
-            "title": f"[{sub.get('source', 'N/A')}] {sub.get('releaseName', 'Unknown')} ({sub.get('score', 0)}%)"
+            "title": f"[{sub.get('source', 'OS')}] {sub.get('releaseName', 'Unknown')}"
+            # "title": f"[{sub.get('source', 'N/A')}] {sub.get('releaseName', 'Unknown')} ({sub.get('score', 0)}%)"
         })
         
     subtitle_cache[cache_key] = stremio_subtitles
