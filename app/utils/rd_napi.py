@@ -1,126 +1,186 @@
 """
-Real-Debrid → NapiProjekt bridge.
+Real-Debrid → NapiProjekt bridge (fully async).
 
 Flow:
-  1. Get recent downloads from RD API
-  2. Find matching file by video_size
-  3. Download first 10MB from RD streaming URL
-  4. Compute FULL 32-char MD5 (NapiProjekt hash)
-  5. Download subtitles via napi_decoder
+  1. Search RD /downloads AND /torrents for matching video_size
+  2. Get streaming URL
+  3. Download first 10MB → compute MD5
+  4. Download subtitles via napi_decoder
 """
 
 import hashlib
-import requests
-import asyncio
+import traceback
+import httpx
 from app.utils.napi_decoder import download_by_napi_hash
 
 
-# --- 1. Get recent downloads from Real-Debrid ---
+RD_API = "https://api.real-debrid.com/rest/1.0"
 
-def get_rd_downloads(rd_token: str) -> list:
+
+async def get_rd_downloads(rd_token: str) -> list:
+    """Get recent downloads from RD."""
     try:
-        r = requests.get(
-            "https://api.real-debrid.com/rest/1.0/downloads",
-            headers={"Authorization": f"Bearer {rd_token}"},
-            timeout=10
-        )
-        if r.status_code != 200:
-            print(f"⚠️ RD API returned {r.status_code}")
-            return []
-        return r.json()
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{RD_API}/downloads",
+                headers={"Authorization": f"Bearer {rd_token}"},
+            )
+            if r.status_code != 200:
+                print(f"⚠️ RD /downloads returned {r.status_code}")
+                return []
+            data = r.json()
+            print(f"📂 RD /downloads: {len(data)} elementów")
+            return data
     except Exception as e:
-        print(f"❌ RD API error: {e}")
+        print(f"❌ RD /downloads error: {e}")
         return []
 
 
-# --- 2. Find matching file by size ---
+async def get_rd_torrents(rd_token: str) -> list:
+    """Get active/recent torrents from RD (this is where streaming files live!)."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            r = await client.get(
+                f"{RD_API}/torrents",
+                headers={"Authorization": f"Bearer {rd_token}"},
+            )
+            if r.status_code != 200:
+                print(f"⚠️ RD /torrents returned {r.status_code}")
+                return []
+            data = r.json()
+            print(f"📂 RD /torrents: {len(data)} elementów")
+            return data
+    except Exception as e:
+        print(f"❌ RD /torrents error: {e}")
+        return []
 
-def find_matching_file(downloads: list, video_size: str) -> dict | None:
+
+async def get_torrent_streaming_url(rd_token: str, torrent_id: str) -> str | None:
+    """Get streaming/download URL for a specific torrent file."""
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            # Get torrent info with file list
+            r = await client.get(
+                f"{RD_API}/torrents/info/{torrent_id}",
+                headers={"Authorization": f"Bearer {rd_token}"},
+            )
+            if r.status_code != 200:
+                return None
+
+            info = r.json()
+            links = info.get("links", [])
+            if not links:
+                return None
+
+            # Unrestrict the first link to get direct download URL
+            r2 = await client.post(
+                f"{RD_API}/unrestrict/link",
+                headers={"Authorization": f"Bearer {rd_token}"},
+                data={"link": links[0]},
+            )
+            if r2.status_code != 200:
+                return None
+
+            return r2.json().get("download")
+
+    except Exception as e:
+        print(f"❌ RD torrent info error: {e}")
+        return None
+
+
+def find_by_size_in_downloads(downloads: list, video_size: str) -> dict | None:
+    """Find matching file in /downloads by filesize."""
     for d in downloads:
         if str(d.get("filesize")) == str(video_size):
             return d
     return None
 
 
-# --- 3. Compute PROPER NapiProjekt hash (MD5 of first 10MB) ---
+def find_by_size_in_torrents(torrents: list, video_size: str) -> dict | None:
+    """Find matching torrent in /torrents by bytes."""
+    for t in torrents:
+        if str(t.get("bytes")) == str(video_size):
+            return t
+    return None
 
-def napi_hash_from_url(url: str) -> str | None:
-    """
-    Download first 10MB of video and compute FULL 32-char MD5 hash.
 
-    BUG FIX: Previously used hexdigest()[:16] which truncated the hash!
-    NapiProjekt requires the FULL 32-character MD5 hash.
-    """
+async def napi_hash_from_url(url: str) -> str | None:
+    """Download first 10MB and compute full 32-char MD5."""
     try:
-        headers = {"Range": "bytes=0-10485759"}  # first 10MB
-        r = requests.get(url, headers=headers, timeout=30, stream=True)
+        async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
+            headers = {"Range": "bytes=0-10485759"}
+            r = await client.get(url, headers=headers)
 
-        if r.status_code not in (200, 206):
-            print(f"⚠️ Video download returned {r.status_code}")
-            return None
+            if r.status_code not in (200, 206):
+                print(f"⚠️ Video download returned {r.status_code}")
+                return None
 
-        data = r.content
-        if len(data) < 1024:
-            print(f"⚠️ Video chunk too small: {len(data)} bytes")
-            return None
+            data = r.content
+            if len(data) < 1024:
+                print(f"⚠️ Video chunk too small: {len(data)} bytes")
+                return None
 
-        # FULL 32-char MD5 hash - NOT truncated!
-        full_hash = hashlib.md5(data).hexdigest()
-        print(f"📊 NapiProjekt hash: {full_hash} (from {len(data)} bytes)")
-        return full_hash
+            full_hash = hashlib.md5(data).hexdigest()
+            print(f"📊 NapiProjekt hash: {full_hash} (from {len(data)} bytes)")
+            return full_hash
 
     except Exception as e:
         print(f"❌ Hash computation error: {e}")
         return None
 
 
-# --- 4. Download subtitles using proper napi_decoder ---
-
-def fetch_napi_subtitles_sync(napi_hash: str) -> str | None:
+async def get_napi_from_rd(rd_token: str, video_size: str) -> str | None:
     """
-    Synchronous wrapper around async download_by_napi_hash.
-    Uses the proper dl.php endpoint with subhash token.
+    Full async pipeline:
+      1. Check /downloads by filesize
+      2. Check /torrents by bytes
+      3. Get streaming URL → compute hash → download subs
     """
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # We're inside an async context already - create a task
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                future = pool.submit(asyncio.run, download_by_napi_hash(napi_hash))
-                return future.result(timeout=20)
-        else:
-            return asyncio.run(download_by_napi_hash(napi_hash))
+        # --- Try /downloads first ---
+        downloads = await get_rd_downloads(rd_token)
+        match = find_by_size_in_downloads(downloads, video_size)
+
+        if match:
+            download_url = match.get("download")
+            if download_url:
+                print(f"✅ RD: znaleziono w /downloads")
+                return await _hash_and_fetch(download_url)
+
+        # --- Try /torrents ---
+        torrents = await get_rd_torrents(rd_token)
+        tmatch = find_by_size_in_torrents(torrents, video_size)
+
+        if tmatch:
+            torrent_id = tmatch.get("id")
+            print(f"✅ RD: znaleziono w /torrents (id={torrent_id})")
+            stream_url = await get_torrent_streaming_url(rd_token, torrent_id)
+            if stream_url:
+                return await _hash_and_fetch(stream_url)
+            else:
+                print("⚠️ RD: nie udało się pobrać streaming URL z torrenta")
+
+        # --- Log available sizes for debugging ---
+        dl_sizes = [str(d.get("filesize")) for d in downloads[:5]]
+        t_sizes = [str(t.get("bytes")) for t in torrents[:5]]
+        print(f"ℹ️ RD: szukany size={video_size}")
+        print(f"ℹ️ RD: dostępne /downloads sizes (top 5): {dl_sizes}")
+        print(f"ℹ️ RD: dostępne /torrents sizes (top 5): {t_sizes}")
+
+        return None
+
     except Exception as e:
-        print(f"❌ Napi fetch error: {e}")
+        print(f"❌ RD pipeline error: {e}")
+        traceback.print_exc()
         return None
 
 
-# --- 5. MAIN: everything together ---
-
-def get_napi_from_rd(rd_token: str, video_size: str) -> str | None:
-    """
-    Full pipeline: RD downloads → match by size → compute hash → download subs.
-    """
-    downloads = get_rd_downloads(rd_token)
-    if not downloads:
-        print("ℹ️ RD: brak pobrań")
-        return None
-
-    match = find_matching_file(downloads, video_size)
-    if not match:
-        print(f"ℹ️ RD: nie znaleziono pliku o rozmiarze {video_size}")
-        return None
-
-    download_url = match.get("download")
-    if not download_url:
-        print("ℹ️ RD: brak URL do pobrania")
-        return None
-
-    print(f"⚡ RD: pobieranie 10MB z {download_url[:60]}...")
-    napi_hash = napi_hash_from_url(download_url)
+async def _hash_and_fetch(video_url: str) -> str | None:
+    """Download 10MB → hash → fetch subtitles."""
+    print(f"⚡ RD: pobieranie 10MB z {video_url[:80]}...")
+    napi_hash = await napi_hash_from_url(video_url)
     if not napi_hash:
         return None
 
     print(f"⚡ RD: szukam napisów dla hash {napi_hash}")
-    return fetch_napi_subtitles_sync(napi_hash)
+    return await download_by_napi_hash(napi_hash)

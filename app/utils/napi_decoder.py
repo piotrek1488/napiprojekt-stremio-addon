@@ -8,7 +8,7 @@ Two modes:
 
 import io
 import re
-import logging
+import traceback
 
 import httpx
 import py7zr
@@ -17,14 +17,11 @@ NAPI_PASSWORD = "iBlm8NTigvru0Jr0"
 NAPI_DL_URL = "http://napiprojekt.pl/unit_napisy/dl.php"
 NAPI_SEARCH_URL = "https://www.napiprojekt.pl/ajax/search_catalog.php"
 
-logger = logging.getLogger(__name__)
-
 
 def get_subhash(md5hash: str) -> str:
     """
     Compute NapiProjekt verification token from MD5 hash.
-    This is the 'f()' function from qnapi/subliminal - required by dl.php.
-    Without this token, NapiProjekt returns 403!
+    Required by dl.php — without it you get 403!
     """
     idx = [0xe, 0x3, 0x6, 0x8, 0x2]
     mul = [2, 2, 5, 4, 3]
@@ -41,16 +38,12 @@ def get_subhash(md5hash: str) -> str:
 
 
 def extract_7z_to_srt(data: bytes) -> str | None:
-    """
-    Extract subtitle from 7z archive data (password: iBlm8NTigvru0Jr0).
-    Returns decoded text as UTF-8 string.
-    """
+    """Extract subtitle from 7z archive (password: iBlm8NTigvru0Jr0)."""
     try:
         archive = py7zr.SevenZipFile(io.BytesIO(data), mode='r', password=NAPI_PASSWORD)
         filenames = archive.getnames()
         if not filenames:
             return None
-
         extracted = archive.read(filenames)
         archive.close()
 
@@ -65,12 +58,12 @@ def extract_7z_to_srt(data: bytes) -> str | None:
                     continue
         return None
     except Exception as e:
-        logger.error(f"7z extraction error: {e}")
+        print(f"❌ 7z extraction error: {e}")
+        traceback.print_exc()
         return None
 
 
 def ensure_srt_format(text: str) -> str:
-    """Ensure subtitle is valid SRT. Convert MicroDVD/TMPlayer if needed."""
     text = text.strip()
     if re.match(r'^\d+\s*\r?\n\d{2}:\d{2}:\d{2}', text):
         return text
@@ -89,9 +82,7 @@ def _convert_microdvd(text: str, fps: float = 23.976) -> str:
             continue
         sf, ef = int(m.group(1)), int(m.group(2))
         content = m.group(3).replace('|', '\n')
-        st = _f2t(sf, fps)
-        et = _f2t(ef, fps)
-        entries.append(f"{counter}\n{st} --> {et}\n{content}\n")
+        entries.append(f"{counter}\n{_f2t(sf, fps)} --> {_f2t(ef, fps)}\n{content}\n")
         counter += 1
     return '\n'.join(entries)
 
@@ -119,12 +110,8 @@ def _f2t(frame: int, fps: float) -> str:
 # =====================================================
 
 async def download_by_napi_hash(napi_hash: str, language: str = "PL") -> str | None:
-    """
-    Download subtitles using a proper NapiProjekt MD5 hash.
-    Uses dl.php + subhash token (the key to avoiding 403!).
-    """
     if not napi_hash or len(napi_hash) != 32:
-        print(f"⚠️ Invalid napi hash: {napi_hash} (need 32 hex chars)")
+        print(f"⚠️ Invalid napi hash: '{napi_hash}' (need 32 hex chars)")
         return None
 
     subhash = get_subhash(napi_hash)
@@ -142,6 +129,7 @@ async def download_by_napi_hash(napi_hash: str, language: str = "PL") -> str | N
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(NAPI_DL_URL, params=params)
+            print(f"📡 Napi dl.php: status={resp.status_code}, size={len(resp.content)} bytes")
             resp.raise_for_status()
 
             if resp.content[:4] == b'NPc0':
@@ -150,11 +138,14 @@ async def download_by_napi_hash(napi_hash: str, language: str = "PL") -> str | N
 
             srt = extract_7z_to_srt(resp.content)
             if srt:
-                print(f"✅ Napi: napisy pobrane dla hash {napi_hash}")
+                print(f"✅ Napi: napisy pobrane! ({len(srt)} znaków)")
+            else:
+                print(f"❌ Napi: nie udało się rozpakować 7z")
             return srt
 
     except Exception as e:
-        print(f"❌ Napi download error: {e}")
+        print(f"❌ Napi dl.php error: {e}")
+        traceback.print_exc()
         return None
 
 
@@ -163,10 +154,10 @@ async def download_by_napi_hash(napi_hash: str, language: str = "PL") -> str | N
 # =====================================================
 
 async def search_by_title(title: str, year: str = "") -> list[dict]:
-    """Search napiprojekt.pl by title."""
     query = f"{title} {year}".strip() if year else title
     results = []
     try:
+        print(f"🌐 Napi: wysyłam request do {NAPI_SEARCH_URL} query='{query}'")
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             resp = await client.get(
                 NAPI_SEARCH_URL,
@@ -177,11 +168,23 @@ async def search_by_title(title: str, year: str = "") -> list[dict]:
                     "Referer": "https://www.napiprojekt.pl/",
                 }
             )
+            print(f"🌐 Napi search response: status={resp.status_code}, size={len(resp.text)} chars")
+
             if resp.status_code != 200:
+                print(f"⚠️ Napi search: HTTP {resp.status_code}")
+                print(f"⚠️ Response body: {resp.text[:500]}")
                 return results
 
+            html = resp.text
+            if len(html) < 10:
+                print(f"⚠️ Napi search: pusta odpowiedź")
+                return results
+
+            # Log first 300 chars of response for debugging
+            print(f"🔎 Napi search response preview: {html[:300]}")
+
             pattern = r'href="[^"]*napisy[^"]*-(\d+)-([^"]+)"'
-            for napi_id, slug in re.findall(pattern, resp.text):
+            for napi_id, slug in re.findall(pattern, html):
                 ym = re.search(r'\((\d{4})\)', slug)
                 results.append({
                     "napi_id": napi_id,
@@ -189,32 +192,50 @@ async def search_by_title(title: str, year: str = "") -> list[dict]:
                     "year": ym.group(1) if ym else "",
                     "url": f"https://www.napiprojekt.pl/napisy1,1,1-dla-{napi_id}-{slug}",
                 })
+
             print(f"🔍 Napi search '{query}': {len(results)} wyników")
+            if results:
+                print(f"🔍 Pierwszy wynik: {results[0]}")
+
+    except httpx.ConnectError as e:
+        print(f"❌ Napi search: CANNOT CONNECT to napiprojekt.pl! {e}")
+    except httpx.TimeoutException as e:
+        print(f"❌ Napi search: TIMEOUT connecting to napiprojekt.pl! {e}")
     except Exception as e:
         print(f"❌ Napi search error: {e}")
+        traceback.print_exc()
+
     return results
 
 
 async def scrape_hashes_from_page(napi_url: str) -> list[str]:
-    """Scrape subtitle hashes (napiprojekt:HASH) from a movie page."""
     try:
+        print(f"🌐 Napi: scraping {napi_url}")
         async with httpx.AsyncClient(timeout=15.0, follow_redirects=True) as client:
             resp = await client.get(napi_url, headers={
                 "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36",
             })
+            print(f"🌐 Napi page: status={resp.status_code}, size={len(resp.text)} chars")
             if resp.status_code != 200:
                 return []
             found = re.findall(r'napiprojekt:([a-f0-9]{32})', resp.text)
             hashes = list(dict.fromkeys(found))
             print(f"🔗 Znaleziono {len(hashes)} hashy na stronie")
+            if hashes:
+                print(f"🔗 Pierwszy hash: {hashes[0]}")
             return hashes
+
+    except httpx.ConnectError as e:
+        print(f"❌ Napi scrape: CANNOT CONNECT! {e}")
+    except httpx.TimeoutException as e:
+        print(f"❌ Napi scrape: TIMEOUT! {e}")
     except Exception as e:
-        print(f"❌ Scrape error: {e}")
-        return []
+        print(f"❌ Napi scrape error: {e}")
+        traceback.print_exc()
+    return []
 
 
 async def download_by_title(title: str, year: str = "", language: str = "PL") -> str | None:
-    """Full title-based flow: search → scrape hashes → try downloading each."""
     results = await search_by_title(title, year)
 
     if year and results:
@@ -232,7 +253,7 @@ async def download_by_title(title: str, year: str = "", language: str = "PL") ->
 
 
 # =====================================================
-# Main entry point (called by main.py endpoints)
+# Main entry point
 # =====================================================
 
 async def get_napi_subtitles_text(
@@ -241,11 +262,6 @@ async def get_napi_subtitles_text(
     year: str = "",
     language: str = "PL",
 ) -> str | None:
-    """
-    Main function called by main.py.
-    - napi_hash (32 chars): download directly
-    - title: search + scrape + download
-    """
     if napi_hash and len(napi_hash) == 32:
         print(f"🎯 Napi: próba pobrania po hash {napi_hash}")
         result = await download_by_napi_hash(napi_hash, language)
