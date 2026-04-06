@@ -6,5 +6,5 @@ thefuzz
 cachetools
 python-Levenshtein
 python-dotenv
-py7zr
-requests
+py7zr>=0.20
+requests>=2.31
