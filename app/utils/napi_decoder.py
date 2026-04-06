@@ -1,32 +1,27 @@
 """
 NapiProjekt subtitle decoder / downloader.
 
-Uses api-napiprojekt3.php with mode=1 (same as QNapi client).
-NO scraping of napiprojekt.pl website (blocked by Cloudflare).
-
-The ONLY way to get subtitles from NapiProjekt is:
-  1. Have the actual video file (or streaming URL)
-  2. Compute MD5 of first 10MB
-  3. Send hash to api-napiprojekt3.php
+Methods:
+  1. Hash-based via dl.php with subhash token (subliminal-style)
+  2. Hash-based via api-napiprojekt3.php mode=1 (QNapi-style)
+  3. Title search via api-napiprojekt3.php mode=3 (may or may not work from cloud)
 """
 
 import io
 import re
 import traceback
-import hashlib
+import base64
+import xml.etree.ElementTree as ET
 
 import httpx
 import py7zr
 
 NAPI_PASSWORD = "iBlm8NTigvru0Jr0"
-
-# Two endpoints that work without Cloudflare:
 NAPI_API_URL = "http://napiprojekt.pl/api/api-napiprojekt3.php"
 NAPI_DL_URL = "http://napiprojekt.pl/unit_napisy/dl.php"
 
 
 def get_subhash(md5hash: str) -> str:
-    """Compute verification token for dl.php endpoint."""
     idx = [0xe, 0x3, 0x6, 0x8, 0x2]
     mul = [2, 2, 5, 4, 3]
     add = [0, 0xd, 0x10, 0xb, 0x5]
@@ -42,7 +37,6 @@ def get_subhash(md5hash: str) -> str:
 
 
 def extract_7z_to_srt(data: bytes) -> str | None:
-    """Extract subtitle from 7z archive (password: iBlm8NTigvru0Jr0)."""
     try:
         archive = py7zr.SevenZipFile(io.BytesIO(data), mode='r', password=NAPI_PASSWORD)
         filenames = archive.getnames()
@@ -61,7 +55,7 @@ def extract_7z_to_srt(data: bytes) -> str | None:
                     continue
         return None
     except Exception as e:
-        print(f"❌ 7z extraction error: {e}")
+        print(f"❌ 7z error: {e}")
         return None
 
 
@@ -76,48 +70,73 @@ def ensure_srt_format(text: str) -> str:
     return text
 
 
-def _convert_microdvd(text: str, fps: float = 23.976) -> str:
-    entries, counter = [], 1
+def _convert_microdvd(text, fps=23.976):
+    entries, c = [], 1
     for line in text.strip().split('\n'):
         m = re.match(r'\{(\d+)\}\{(\d+)\}(.+)', line.strip())
-        if not m:
-            continue
+        if not m: continue
         sf, ef = int(m.group(1)), int(m.group(2))
-        content = m.group(3).replace('|', '\n')
-        entries.append(f"{counter}\n{_f2t(sf, fps)} --> {_f2t(ef, fps)}\n{content}\n")
-        counter += 1
+        entries.append(f"{c}\n{_f2t(sf,fps)} --> {_f2t(ef,fps)}\n{m.group(3).replace('|',chr(10))}\n")
+        c += 1
     return '\n'.join(entries)
 
 
-def _convert_tmplayer(text: str) -> str:
-    entries, counter = [], 1
+def _convert_tmplayer(text):
+    entries, c = [], 1
     for line in text.strip().split('\n'):
         m = re.match(r'(\d{1,2}):(\d{2}):(\d{2})[=:](.+)', line.strip())
-        if not m:
-            continue
+        if not m: continue
         h, mi, s = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        content = m.group(4).replace('|', '\n')
-        entries.append(f"{counter}\n{h:02d}:{mi:02d}:{s:02d},000 --> {h:02d}:{mi:02d}:{min(s+2,59):02d},000\n{content}\n")
-        counter += 1
+        entries.append(f"{c}\n{h:02d}:{mi:02d}:{s:02d},000 --> {h:02d}:{mi:02d}:{min(s+2,59):02d},000\n{m.group(4).replace('|',chr(10))}\n")
+        c += 1
     return '\n'.join(entries)
 
 
-def _f2t(frame: int, fps: float) -> str:
+def _f2t(frame, fps):
     ms = int(frame / fps * 1000)
     return f"{ms//3600000:02d}:{(ms%3600000)//60000:02d}:{(ms%60000)//1000:02d},{ms%1000:03d}"
 
 
 # =====================================================
-# METHOD A: api-napiprojekt3.php mode=1 (like QNapi)
+# METHOD A: dl.php + subhash (subliminal/qnapi style)
+# =====================================================
+
+async def download_via_dl(napi_hash: str, language: str = "PL") -> str | None:
+    if not napi_hash or len(napi_hash) != 32:
+        return None
+
+    subhash = get_subhash(napi_hash)
+    params = {
+        "v": "dreambox", "kolejka": "false", "nick": "", "pass": "",
+        "napios": "Linux", "l": language.upper(), "f": napi_hash, "t": subhash,
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.get(NAPI_DL_URL, params=params)
+            print(f"📡 dl.php: status={resp.status_code} size={len(resp.content)}b")
+
+            if resp.status_code != 200:
+                return None
+            if resp.content[:4] == b'NPc0':
+                print(f"ℹ️ dl.php: brak napisów")
+                return None
+
+            srt = extract_7z_to_srt(resp.content)
+            if srt:
+                print(f"✅ dl.php: OK! ({len(srt)} znaków)")
+            return srt
+    except Exception as e:
+        print(f"❌ dl.php error: {e}")
+        return None
+
+
+# =====================================================
+# METHOD B: api-napiprojekt3.php mode=1 (QNapi style)
 # =====================================================
 
 async def download_via_api(napi_hash: str, file_size: int = 0, language: str = "PL") -> str | None:
-    """
-    Download subtitles using api-napiprojekt3.php (same as QNapi).
-    This endpoint is NOT behind Cloudflare.
-    """
     if not napi_hash or len(napi_hash) != 32:
-        print(f"⚠️ Invalid napi hash: '{napi_hash}'")
         return None
 
     data = {
@@ -128,154 +147,165 @@ async def download_via_api(napi_hash: str, file_size: int = 0, language: str = "
         "downloaded_subtitles_txt": "1",
         "downloaded_subtitles_lang": language.upper(),
     }
-
-    # QNapi also sends these when available
     if file_size:
-        data["downloaded_subtitles_id"] = napi_hash
         data["file_size"] = str(file_size)
-
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "User-Agent": "other",
-    }
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(NAPI_API_URL, data=data, headers=headers)
-            print(f"📡 Napi API: status={resp.status_code}, size={len(resp.content)} bytes")
+            resp = await client.post(
+                NAPI_API_URL, data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "other"}
+            )
+            print(f"📡 API mode=1: status={resp.status_code} size={len(resp.content)}b")
 
-            if resp.status_code != 200:
-                print(f"⚠️ Napi API: HTTP {resp.status_code}")
+            if resp.status_code != 200 or len(resp.content) < 100:
+                print(f"ℹ️ API mode=1: brak napisów (response too short or error)")
                 return None
 
+            text = resp.text
             content = resp.content
 
-            # Check if response contains subtitles
-            # API returns XML with status, or raw subtitle data
-            text = resp.text
-
-            # If response is very short or contains "not found" indicator
-            if len(content) < 100:
-                print(f"ℹ️ Napi API: odpowiedź za krótka ({len(content)} bytes) - brak napisów")
-                return None
-
-            # Check if it's XML with subtitle content
+            # Try XML with base64-encoded 7z
             if "<content>" in text:
-                # Extract base64 content from XML
-                import base64
-                import xml.etree.ElementTree as ET
                 try:
                     root = ET.fromstring(text)
-                    content_node = root.find(".//content")
-                    if content_node is not None and content_node.text:
-                        compressed = base64.b64decode(content_node.text)
+                    cn = root.find(".//content")
+                    if cn is not None and cn.text:
+                        compressed = base64.b64decode(cn.text)
                         srt = extract_7z_to_srt(compressed)
                         if srt:
-                            print(f"✅ Napi API (XML/7z): napisy pobrane! ({len(srt)} znaków)")
+                            print(f"✅ API mode=1 (XML/7z): OK! ({len(srt)} znaków)")
                             return srt
                 except ET.ParseError:
                     pass
 
-            # Check if response is plain text subtitle (mode=1 with txt=1)
-            if text.strip().startswith("1\n") or text.strip().startswith("1\r\n"):
-                # Looks like SRT already
-                print(f"✅ Napi API (plain text): napisy pobrane! ({len(text)} znaków)")
+            # Try plain text SRT
+            if re.search(r'\d{2}:\d{2}:\d{2}', text):
+                print(f"✅ API mode=1 (text): OK!")
                 return ensure_srt_format(text)
 
-            # Check if it's a 7z archive directly
-            if content[:2] == b'7z' or content[:6] == b"7z\xbc\xaf'\x1c":
+            # Try raw 7z
+            if content[:2] in (b'7z', b'\x37\x7a'):
                 srt = extract_7z_to_srt(content)
                 if srt:
-                    print(f"✅ Napi API (7z): napisy pobrane! ({len(srt)} znaków)")
+                    print(f"✅ API mode=1 (raw 7z): OK!")
                     return srt
 
-            # Try treating entire response as subtitle text
-            for enc in ['utf-8', 'windows-1250', 'iso-8859-2']:
-                try:
-                    decoded = content.decode(enc)
-                    if re.search(r'\d{2}:\d{2}:\d{2}', decoded):
-                        print(f"✅ Napi API (decoded {enc}): napisy pobrane!")
-                        return ensure_srt_format(decoded)
-                except:
-                    continue
+            print(f"ℹ️ API mode=1: nie rozpoznano formatu (first 80b: {content[:80]})")
+            return None
+    except Exception as e:
+        print(f"❌ API mode=1 error: {e}")
+        return None
 
-            print(f"ℹ️ Napi API: nie rozpoznano formatu odpowiedzi (first 100 bytes: {content[:100]})")
+
+# =====================================================
+# METHOD C: api-napiprojekt3.php mode=3 (title search)
+# This endpoint is on napiprojekt.pl (no www), so might
+# bypass Cloudflare that blocks www.napiprojekt.pl
+# =====================================================
+
+async def search_via_api(title: str, year: str = "", language: str = "PL") -> str | None:
+    """
+    Try api-napiprojekt3.php with mode=3 for title-based search.
+    Returns SRT text or None.
+    """
+    search_query = title
+    if year:
+        search_query = f"{title} {year}"
+
+    data = {
+        "mode": "3",
+        "client": "NapiProjektPython",
+        "client_ver": "2.2.0.2399",
+        "search_title": search_query,
+        "search_year": year,
+        "downloaded_subtitles_lang": language.upper(),
+        "the": "end",
+    }
+
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            resp = await client.post(
+                NAPI_API_URL, data=data,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "User-Agent": "NapiProjekt/2.2.0.2399 (Windows NT)",
+                }
+            )
+            print(f"📡 API mode=3 search '{search_query}': status={resp.status_code} size={len(resp.content)}b")
+            print(f"📡 API mode=3 response preview: {resp.text[:300]}")
+
+            if resp.status_code != 200:
+                print(f"⚠️ API mode=3: HTTP {resp.status_code}")
+                return None
+
+            text = resp.text
+
+            # Check if response contains subtitles
+            if "<content>" in text:
+                try:
+                    root = ET.fromstring(text)
+                    cn = root.find(".//content")
+                    if cn is not None and cn.text:
+                        compressed = base64.b64decode(cn.text)
+                        srt = extract_7z_to_srt(compressed)
+                        if srt:
+                            print(f"✅ API mode=3: napisy znalezione! ({len(srt)} znaków)")
+                            return srt
+                except ET.ParseError as e:
+                    print(f"⚠️ API mode=3: XML parse error: {e}")
+
+            # Check for hash references in response
+            hashes = re.findall(r'[a-f0-9]{32}', text)
+            if hashes:
+                print(f"🔗 API mode=3: znaleziono {len(hashes)} hashy, próbuję pobrać...")
+                for h in hashes[:3]:
+                    srt = await download_via_dl(h, language)
+                    if srt:
+                        return srt
+
+            # Check if it's a direct subtitle response
+            if re.search(r'\d{2}:\d{2}:\d{2}', text) and len(text) > 200:
+                print(f"✅ API mode=3 (direct text): OK!")
+                return ensure_srt_format(text)
+
+            print(f"ℹ️ API mode=3: brak napisów w odpowiedzi")
             return None
 
     except Exception as e:
-        print(f"❌ Napi API error: {e}")
+        print(f"❌ API mode=3 error: {e}")
         traceback.print_exc()
         return None
 
 
 # =====================================================
-# METHOD B: dl.php with subhash (subliminal-style)
-# =====================================================
-
-async def download_via_dl(napi_hash: str, language: str = "PL") -> str | None:
-    """
-    Download subtitles using dl.php endpoint.
-    Also NOT behind Cloudflare.
-    """
-    if not napi_hash or len(napi_hash) != 32:
-        return None
-
-    subhash = get_subhash(napi_hash)
-    params = {
-        "v": "dreambox",
-        "kolejka": "false",
-        "nick": "",
-        "pass": "",
-        "napios": "Linux",
-        "l": language.upper(),
-        "f": napi_hash,
-        "t": subhash,
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.get(NAPI_DL_URL, params=params)
-            print(f"📡 Napi dl.php: status={resp.status_code}, size={len(resp.content)} bytes")
-
-            if resp.status_code != 200:
-                return None
-
-            if resp.content[:4] == b'NPc0':
-                print(f"ℹ️ Napi dl.php: brak napisów dla hash {napi_hash}")
-                return None
-
-            srt = extract_7z_to_srt(resp.content)
-            if srt:
-                print(f"✅ Napi dl.php: napisy pobrane! ({len(srt)} znaków)")
-            return srt
-
-    except Exception as e:
-        print(f"❌ Napi dl.php error: {e}")
-        return None
-
-
-# =====================================================
-# Main entry: try both methods
+# Combined hash download (try both methods)
 # =====================================================
 
 async def download_by_napi_hash(napi_hash: str, file_size: int = 0, language: str = "PL") -> str | None:
-    """Try api-napiprojekt3.php first, then dl.php as fallback."""
+    if not napi_hash or len(napi_hash) != 32:
+        print(f"⚠️ Invalid hash: '{napi_hash}'")
+        return None
 
-    # Method A: QNapi-style API
-    print(f"🎯 Napi: próba api-napiprojekt3.php dla hash {napi_hash}")
-    result = await download_via_api(napi_hash, file_size, language)
-    if result:
-        return result
+    print(f"🎯 Napi hash download: {napi_hash}")
 
-    # Method B: dl.php with subhash
-    print(f"🎯 Napi: próba dl.php dla hash {napi_hash}")
+    # Try dl.php first (simpler, proven)
     result = await download_via_dl(napi_hash, language)
     if result:
         return result
 
-    print(f"ℹ️ Napi: brak napisów dla hash {napi_hash} (oba endpointy)")
+    # Fallback to API mode=1
+    result = await download_via_api(napi_hash, file_size, language)
+    if result:
+        return result
+
+    print(f"ℹ️ Napi: brak napisów dla hash {napi_hash}")
     return None
 
+
+# =====================================================
+# Main entry point
+# =====================================================
 
 async def get_napi_subtitles_text(
     napi_hash: str = None,
@@ -284,19 +314,17 @@ async def get_napi_subtitles_text(
     file_size: int = 0,
     language: str = "PL",
 ) -> str | None:
-    """
-    Main entry point called by main.py.
+    """Main function called by main.py."""
 
-    NOTE: Title-based search is DISABLED because napiprojekt.pl
-    is behind Cloudflare and blocks requests from cloud servers.
-    The ONLY way to get NapiProjekt subtitles is via hash from RD.
-    """
+    # Direct hash download
     if napi_hash and len(napi_hash) == 32:
         return await download_by_napi_hash(napi_hash, file_size, language)
 
+    # Title search via API mode=3
     if title:
-        print(f"⚠️ Napi: title search disabled (Cloudflare 403). Tytuł: '{title}'")
-        # Cannot search by title — Cloudflare blocks it from cloud servers
-        return None
+        print(f"🔍 Napi: title search via API mode=3 for '{title}' ({year})")
+        result = await search_via_api(title, year, language)
+        if result:
+            return result
 
     return None

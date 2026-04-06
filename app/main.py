@@ -3,7 +3,7 @@ import os
 import traceback
 import unicodedata
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from dotenv import load_dotenv
@@ -125,15 +125,16 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
 
     print(f"🎬 Zapytanie: {imdb_id} | Hash: {video_hash} | Size: {video_size}")
 
-    # TMDB lookup (for display and OpenSubtitles)
+    # TMDB lookup
     movie_info = await get_movie_details(imdb_id)
-    title = ""
+    original_title = ""
+    polish_title = ""
+    year = ""
     if movie_info:
-        title = movie_info.get("original_title") or movie_info.get("title") or ""
-        year = ""
-        if movie_info.get("release_date"):
-            year = movie_info["release_date"][:4]
-        print(f"📋 Film: {title} ({year})")
+        original_title = movie_info.get("original_title", "")
+        polish_title = movie_info.get("title", "")
+        year = movie_info.get("year", "")
+    print(f"📋 Film: {original_title} / {polish_title} ({year})")
 
     cache_key = f"{type}_{imdb_id}_{video_hash}"
     if cache_key in subtitle_cache:
@@ -143,33 +144,58 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
     all_subtitles = []
 
     # ===================================================
-    # 1️⃣ NAPIPROJEKT via Real-Debrid
-    #    Find matching file in RD → download 10MB → MD5 → NapiProjekt API
-    #    This is the ONLY way NapiProjekt works (Cloudflare blocks scraping)
+    # 1️⃣ NAPIPROJEKT via Real-Debrid (hash-based, best match)
     # ===================================================
     if rd_token and video_size:
         print(f"⚡ RD+Napi: szukam pliku po size {video_size}")
         try:
             napi_text = await get_napi_from_rd(rd_token, video_size)
             if napi_text:
-                print("✅ NAPI ZNALEZIONE PRZEZ RD! 🚀🚀🚀")
+                print("✅ NAPI PRZEZ RD! 🚀🚀🚀")
                 srt_key = f"rd_{imdb_id}_{video_size}"
                 subtitle_cache[srt_key] = napi_text
                 all_subtitles.append({
                     "id": "napi_rd",
                     "url": f"{host_url}/serve-srt/{srt_key}.srt",
                     "lang": "pol",
-                    "title": f"[NAPI] {title or imdb_id} 🚀"
+                    "title": f"[NAPI] {original_title or polish_title or imdb_id} 🚀"
                 })
-            else:
-                print("ℹ️ Napi via RD: brak napisów")
         except Exception as e:
             print(f"❌ RD/Napi error: {e}")
             traceback.print_exc()
 
     # ===================================================
-    # 2️⃣ OPENSUBTITLES fallback
-    #    Download actual SRT files, cache and serve via proxy
+    # 2️⃣ NAPIPROJEKT via title search (API mode=3)
+    #    Uses napiprojekt.pl (no www) - might bypass Cloudflare
+    # ===================================================
+    if not all_subtitles and (original_title or polish_title):
+        try:
+            titles_to_try = []
+            if original_title:
+                titles_to_try.append(original_title)
+            if polish_title and polish_title != original_title:
+                titles_to_try.append(polish_title)
+
+            for search_title in titles_to_try:
+                print(f"🔍 Napi API mode=3: '{search_title}' ({year})")
+                napi_text = await get_napi_subtitles_text(title=search_title, year=year)
+                if napi_text:
+                    print(f"✅ Napi via title API: {search_title}")
+                    srt_key = f"napi_title_{imdb_id}"
+                    subtitle_cache[srt_key] = napi_text
+                    all_subtitles.append({
+                        "id": f"napi_title_{imdb_id}",
+                        "url": f"{host_url}/serve-srt/{srt_key}.srt",
+                        "lang": "pol",
+                        "title": f"[NAPI] {search_title} 🔍"
+                    })
+                    break
+        except Exception as e:
+            print(f"❌ Napi title error: {e}")
+            traceback.print_exc()
+
+    # ===================================================
+    # 3️⃣ OPENSUBTITLES fallback
     # ===================================================
     if os_api_key:
         try:
@@ -189,12 +215,11 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
                         "title": f"[OS] {sub.get('releaseName', 'Unknown')}"
                     })
             os_count = sum(1 for s in all_subtitles if s['id'].startswith('os_'))
-            print(f"✅ OpenSubtitles: dodano {os_count} napisów")
+            print(f"✅ OpenSubtitles: {os_count} napisów")
         except Exception as e:
             print(f"❌ OpenSubtitles error: {e}")
             traceback.print_exc()
 
-    # Scoring + cache
     stremio_subtitles = score_subtitles(all_subtitles, release_name)
     subtitle_cache[cache_key] = stremio_subtitles
     print(f"📤 Zwracam {len(stremio_subtitles)} napisów dla {imdb_id}")
@@ -206,7 +231,6 @@ async def get_subtitles(type: str, id: str, request: Request, extra: str = None)
 async def serve_srt(cache_key: str):
     srt_text = subtitle_cache.get(cache_key)
     if not srt_text:
-        print(f"⚠️ SRT not in cache: {cache_key}")
         return Response(content="Subtitle not found or expired", status_code=404)
     return Response(
         content=srt_text,
@@ -214,7 +238,40 @@ async def serve_srt(cache_key: str):
         headers={"Content-Type": "text/plain; charset=utf-8", "Access-Control-Allow-Origin": "*"}
     )
 
-# --- LEGACY ENDPOINTS ---
+# --- DEBUG ENDPOINT: test NapiProjekt directly ---
+
+@app.get("/debug/napi")
+async def debug_napi(request: Request):
+    """
+    Test NapiProjekt directly.
+    Usage:
+      /debug/napi?hash=a1b2c3d4...  (32 hex chars)
+      /debug/napi?title=Joker&year=2019
+      /debug/napi?rd_token=XXX&video_size=2054149306
+    """
+    napi_hash = request.query_params.get("hash")
+    title = request.query_params.get("title")
+    year = request.query_params.get("year", "")
+    rd_token = request.query_params.get("rd_token")
+    video_size = request.query_params.get("video_size")
+
+    result = {"status": "no input"}
+
+    if napi_hash:
+        srt = await get_napi_subtitles_text(napi_hash=napi_hash)
+        result = {"method": "hash", "hash": napi_hash, "found": srt is not None, "length": len(srt) if srt else 0}
+
+    elif title:
+        srt = await get_napi_subtitles_text(title=title, year=year)
+        result = {"method": "title", "title": title, "year": year, "found": srt is not None, "length": len(srt) if srt else 0}
+
+    elif rd_token and video_size:
+        srt = await get_napi_from_rd(rd_token, video_size)
+        result = {"method": "rd", "video_size": video_size, "found": srt is not None, "length": len(srt) if srt else 0}
+
+    return JSONResponse(result)
+
+# --- LEGACY ---
 
 @app.get("/fetch-napi/{v_hash}.srt")
 async def fetch_napi_proxy(v_hash: str):

@@ -1,12 +1,9 @@
 """
 Real-Debrid → NapiProjekt bridge (fully async).
 
-Key insight: Stremio sends videoSize = size of the VIDEO FILE being played.
-  - RD /downloads → filesize = individual file size ✓ (direct match possible)
-  - RD /torrents → bytes = TOTAL torrent size ✗ (folder of files!)
-  - RD /torrents/info/{id} → files[].bytes = individual file sizes ✓
-
-So we need to drill into each torrent to find the matching file.
+Stremio sends videoSize = size of the VIDEO FILE being played.
+RD /torrents → bytes = TOTAL torrent size (wrong!)
+RD /torrents/info/{id} → files[].bytes = individual file sizes (correct!)
 """
 
 import hashlib
@@ -18,97 +15,110 @@ from app.utils.napi_decoder import download_by_napi_hash
 RD_API = "https://api.real-debrid.com/rest/1.0"
 
 
-async def _rd_get(client: httpx.AsyncClient, path: str, rd_token: str):
-    """Helper for RD API GET requests."""
-    r = await client.get(
-        f"{RD_API}{path}",
-        headers={"Authorization": f"Bearer {rd_token}"},
-    )
-    return r
-
-
 async def get_napi_from_rd(rd_token: str, video_size: str) -> str | None:
-    """
-    Find the video file in RD matching video_size, compute NapiProjekt hash, download subs.
-    """
-    target_size = str(video_size)
-    print(f"🔎 RD: szukam pliku o rozmiarze {target_size}")
+    target = str(video_size)
+    print(f"🔎 RD: szukam pliku o rozmiarze {target}")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=20.0) as client:
+            auth = {"Authorization": f"Bearer {rd_token}"}
 
-            # === 1. Check /downloads (direct links) ===
-            r = await _rd_get(client, "/downloads", rd_token)
-            if r.status_code == 200:
-                downloads = r.json()
-                print(f"📂 RD /downloads: {len(downloads)} elementów")
+            # === 1. Check /downloads ===
+            r = await client.get(f"{RD_API}/downloads", headers=auth)
+            downloads = r.json() if r.status_code == 200 else []
+            print(f"📂 RD /downloads: {len(downloads)} elementów")
 
-                for d in downloads:
-                    if str(d.get("filesize")) == target_size:
-                        dl_url = d.get("download")
-                        if dl_url:
-                            print(f"✅ RD: znaleziono match w /downloads! filesize={d.get('filesize')}")
-                            return await _hash_and_fetch(dl_url)
-            else:
-                print(f"⚠️ RD /downloads: HTTP {r.status_code}")
+            for d in downloads:
+                if str(d.get("filesize")) == target:
+                    url = d.get("download")
+                    if url:
+                        print(f"✅ RD /downloads: MATCH! filesize={d.get('filesize')}")
+                        return await _hash_and_fetch(url)
 
-            # === 2. Check /torrents → drill into each for file sizes ===
-            r = await _rd_get(client, "/torrents", rd_token)
-            if r.status_code != 200:
-                print(f"⚠️ RD /torrents: HTTP {r.status_code}")
-                return None
+            # === 2. Check /torrents - drill into EACH one ===
+            r = await client.get(f"{RD_API}/torrents", headers=auth)
+            torrents = r.json() if r.status_code == 200 else []
+            print(f"📂 RD /torrents: {len(torrents)} elementów, sprawdzam każdy...")
 
-            torrents = r.json()
-            print(f"📂 RD /torrents: {len(torrents)} elementów")
+            checked = 0
+            for torrent in torrents[:30]:  # check up to 30
+                tid = torrent.get("id")
+                tname = torrent.get("filename", "?")[:50]
+                tbytes = torrent.get("bytes", 0)
 
-            # Check recent torrents (limit to 20 to avoid too many API calls)
-            for torrent in torrents[:20]:
-                torrent_id = torrent.get("id")
-                torrent_name = torrent.get("filename", "?")
-
-                # Quick skip: if torrent total size is smaller than target, skip
-                torrent_bytes = torrent.get("bytes", 0)
-                if torrent_bytes and int(torrent_bytes) < int(target_size):
+                # Skip if total torrent is smaller than target file
+                if tbytes and int(tbytes) < int(target) * 0.9:
                     continue
 
-                # Get detailed info with file list
-                info_r = await _rd_get(client, f"/torrents/info/{torrent_id}", rd_token)
+                checked += 1
+                # Get detailed file list
+                info_r = await client.get(f"{RD_API}/torrents/info/{tid}", headers=auth)
                 if info_r.status_code != 200:
+                    print(f"  ⚠️ torrent {tid}: info returned {info_r.status_code}")
                     continue
 
                 info = info_r.json()
                 files = info.get("files", [])
                 links = info.get("links", [])
 
-                # Check each file in the torrent
-                for f in files:
-                    file_bytes = f.get("bytes", 0)
-                    file_path = f.get("path", "")
-                    file_selected = f.get("selected", 0)
+                # Log all files in this torrent for debugging
+                video_files = [f for f in files if f.get("selected") == 1]
+                if not video_files:
+                    video_files = files  # if none selected, check all
 
-                    if str(file_bytes) == target_size and file_selected == 1:
-                        print(f"✅ RD: znaleziono match w torrencie '{torrent_name}'!")
-                        print(f"   Plik: {file_path} ({file_bytes} bytes)")
+                for f in video_files:
+                    fb = f.get("bytes", 0)
+                    fp = f.get("path", "?")
+                    fsel = f.get("selected", 0)
 
-                        # Unrestrict the first link to get download URL
-                        if links:
-                            unrestrict_r = await client.post(
-                                f"{RD_API}/unrestrict/link",
-                                headers={"Authorization": f"Bearer {rd_token}"},
-                                data={"link": links[0]},
-                            )
-                            if unrestrict_r.status_code == 200:
-                                dl_url = unrestrict_r.json().get("download")
-                                if dl_url:
-                                    print(f"🔗 RD: unrestricted URL ready")
-                                    return await _hash_and_fetch(dl_url)
-                            else:
-                                print(f"⚠️ RD unrestrict: HTTP {unrestrict_r.status_code}")
+                    # Exact match
+                    if str(fb) == target:
+                        print(f"  ✅ MATCH! torrent='{tname}' file='{fp}' bytes={fb}")
 
-            # === Debug: log what sizes we DID find ===
-            print(f"ℹ️ RD: nie znaleziono pliku o rozmiarze {target_size}")
-            dl_sizes = [str(d.get("filesize", "?")) for d in (downloads if r.status_code == 200 else [])[:5]]
-            print(f"ℹ️ RD: /downloads sizes (top 5): {dl_sizes}")
+                        if not links:
+                            print(f"  ⚠️ Brak linków do unrestrictu!")
+                            continue
+
+                        # Find which link corresponds to this file
+                        # If there are multiple links, try to match by index
+                        # For single-file torrents, use first link
+                        link_to_use = links[0]
+
+                        # For multi-file torrents, try to find the right link
+                        selected_files = [sf for sf in files if sf.get("selected") == 1]
+                        if len(selected_files) > 1 and len(links) > 1:
+                            # Find index of our file among selected files
+                            sel_idx = 0
+                            for sf in selected_files:
+                                if sf.get("bytes") == fb and sf.get("path") == fp:
+                                    break
+                                sel_idx += 1
+                            if sel_idx < len(links):
+                                link_to_use = links[sel_idx]
+
+                        # Unrestrict to get direct download URL
+                        ur = await client.post(
+                            f"{RD_API}/unrestrict/link",
+                            headers=auth,
+                            data={"link": link_to_use},
+                        )
+                        if ur.status_code == 200:
+                            dl_url = ur.json().get("download")
+                            if dl_url:
+                                print(f"  🔗 Unrestricted OK!")
+                                return await _hash_and_fetch(dl_url)
+                        else:
+                            print(f"  ⚠️ Unrestrict failed: {ur.status_code}")
+
+                    # Log near-matches for debugging (within 5%)
+                    elif fb and abs(int(fb) - int(target)) < int(target) * 0.05:
+                        print(f"  🔸 NEAR match: torrent='{tname}' file='{fp}' bytes={fb} (diff={int(fb)-int(target)})")
+
+            print(f"ℹ️ RD: sprawdzono {checked} torrentów, nie znaleziono exact match dla size={target}")
+
+            # Debug: show sizes of first few downloads
+            dl_sizes = [(d.get("filename", "?")[:30], d.get("filesize")) for d in downloads[:3]]
+            print(f"ℹ️ RD /downloads (top 3): {dl_sizes}")
 
             return None
 
@@ -119,31 +129,24 @@ async def get_napi_from_rd(rd_token: str, video_size: str) -> str | None:
 
 
 async def _hash_and_fetch(video_url: str) -> str | None:
-    """Download first 10MB → MD5 hash → fetch NapiProjekt subtitles."""
+    """Download first 10MB → MD5 → NapiProjekt."""
     try:
-        print(f"⚡ RD: pobieranie 10MB z {video_url[:80]}...")
-
+        print(f"⚡ Pobieranie 10MB z {video_url[:80]}...")
         async with httpx.AsyncClient(timeout=30.0, follow_redirects=True) as client:
-            headers = {"Range": "bytes=0-10485759"}
-            r = await client.get(video_url, headers=headers)
-
+            r = await client.get(video_url, headers={"Range": "bytes=0-10485759"})
             if r.status_code not in (200, 206):
-                print(f"⚠️ RD video download: HTTP {r.status_code}")
+                print(f"⚠️ Video download: HTTP {r.status_code}")
                 return None
 
             data = r.content
             if len(data) < 1024:
-                print(f"⚠️ RD video chunk too small: {len(data)} bytes")
+                print(f"⚠️ Video chunk too small: {len(data)} bytes")
                 return None
 
-            # FULL 32-char MD5 hash
             napi_hash = hashlib.md5(data).hexdigest()
-            file_size = len(data)
             print(f"📊 NapiProjekt hash: {napi_hash} (from {len(data)} bytes)")
 
-        # Download subtitles
-        print(f"⚡ Napi: szukam napisów dla hash {napi_hash}")
-        return await download_by_napi_hash(napi_hash, file_size)
+        return await download_by_napi_hash(napi_hash, len(data))
 
     except Exception as e:
         print(f"❌ Hash/fetch error: {e}")
