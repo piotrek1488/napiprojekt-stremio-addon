@@ -1,9 +1,8 @@
 """
-Real-Debrid → NapiProjekt bridge (fully async).
+Real-Debrid → NapiProjekt bridge.
 
-Stremio sends videoSize = size of the VIDEO FILE being played.
-RD /torrents → bytes = TOTAL torrent size (wrong!)
-RD /torrents/info/{id} → files[].bytes = individual file sizes (correct!)
+Checks /downloads and ALL /torrents (drilling into file lists).
+Supports fuzzy size matching (0.5% tolerance) for edge cases.
 """
 
 import hashlib
@@ -11,121 +10,126 @@ import traceback
 import httpx
 from app.utils.napi_decoder import download_by_napi_hash
 
-
 RD_API = "https://api.real-debrid.com/rest/1.0"
 
 
 async def get_napi_from_rd(rd_token: str, video_size: str) -> str | None:
-    target = str(video_size)
-    print(f"🔎 RD: szukam pliku o rozmiarze {target}")
+    target = int(video_size)
+    tolerance = target * 0.005  # 0.5% fuzzy match
+    print(f"🔎 RD: szukam pliku o rozmiarze {target} (tolerancja ±{int(tolerance)})")
+
+    exact_match_url = None
+    fuzzy_match_url = None
+    fuzzy_match_diff = float('inf')
+    fuzzy_match_info = ""
 
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             auth = {"Authorization": f"Bearer {rd_token}"}
 
-            # === 1. Check /downloads ===
+            # === 1. /downloads ===
             r = await client.get(f"{RD_API}/downloads", headers=auth)
             downloads = r.json() if r.status_code == 200 else []
             print(f"📂 RD /downloads: {len(downloads)} elementów")
 
             for d in downloads:
-                if str(d.get("filesize")) == target:
-                    url = d.get("download")
-                    if url:
-                        print(f"✅ RD /downloads: MATCH! filesize={d.get('filesize')}")
-                        return await _hash_and_fetch(url)
+                fs = d.get("filesize", 0)
+                if not fs:
+                    continue
+                fs = int(fs)
+                diff = abs(fs - target)
 
-            # === 2. Check /torrents - drill into EACH one ===
+                if fs == target:
+                    print(f"  ✅ EXACT match w /downloads: {d.get('filename','?')[:50]} ({fs})")
+                    exact_match_url = d.get("download")
+                    break
+                elif diff < tolerance and diff < fuzzy_match_diff:
+                    fuzzy_match_diff = diff
+                    fuzzy_match_url = d.get("download")
+                    fuzzy_match_info = f"/downloads: {d.get('filename','?')[:50]} ({fs}, diff={diff})"
+
+            if exact_match_url:
+                return await _hash_and_fetch(exact_match_url)
+
+            # === 2. /torrents — check ALL of them ===
             r = await client.get(f"{RD_API}/torrents", headers=auth)
             torrents = r.json() if r.status_code == 200 else []
-            print(f"📂 RD /torrents: {len(torrents)} elementów, sprawdzam każdy...")
+            print(f"📂 RD /torrents: {len(torrents)} elementów, sprawdzam WSZYSTKIE...")
 
-            checked = 0
-            for torrent in torrents[:30]:  # check up to 30
+            for torrent in torrents:  # ALL torrents, no limit
                 tid = torrent.get("id")
                 tname = torrent.get("filename", "?")[:50]
-                tbytes = torrent.get("bytes", 0)
 
-                # Skip if total torrent is smaller than target file
-                if tbytes and int(tbytes) < int(target) * 0.9:
-                    continue
-
-                checked += 1
-                # Get detailed file list
                 info_r = await client.get(f"{RD_API}/torrents/info/{tid}", headers=auth)
                 if info_r.status_code != 200:
-                    print(f"  ⚠️ torrent {tid}: info returned {info_r.status_code}")
                     continue
 
                 info = info_r.json()
                 files = info.get("files", [])
                 links = info.get("links", [])
 
-                # Log all files in this torrent for debugging
-                video_files = [f for f in files if f.get("selected") == 1]
-                if not video_files:
-                    video_files = files  # if none selected, check all
+                # Build map: selected file index → link index
+                selected_files = [f for f in files if f.get("selected") == 1]
 
-                for f in video_files:
-                    fb = f.get("bytes", 0)
+                for sel_idx, f in enumerate(selected_files):
+                    fb = int(f.get("bytes", 0))
                     fp = f.get("path", "?")
-                    fsel = f.get("selected", 0)
+                    if not fb:
+                        continue
 
-                    # Exact match
-                    if str(fb) == target:
-                        print(f"  ✅ MATCH! torrent='{tname}' file='{fp}' bytes={fb}")
+                    diff = abs(fb - target)
 
-                        if not links:
-                            print(f"  ⚠️ Brak linków do unrestrictu!")
-                            continue
+                    if fb == target:
+                        print(f"  ✅ EXACT match! torrent='{tname}' file='{fp}' ({fb})")
+                        url = await _unrestrict_file(client, auth, links, sel_idx)
+                        if url:
+                            return await _hash_and_fetch(url)
 
-                        # Find which link corresponds to this file
-                        # If there are multiple links, try to match by index
-                        # For single-file torrents, use first link
-                        link_to_use = links[0]
+                    elif diff < tolerance and diff < fuzzy_match_diff:
+                        fuzzy_match_diff = diff
+                        fuzzy_match_info = f"torrent '{tname}' file '{fp}' ({fb}, diff={diff})"
+                        # Store info to unrestrict later if needed
+                        fuzzy_match_url = (links, sel_idx)
 
-                        # For multi-file torrents, try to find the right link
-                        selected_files = [sf for sf in files if sf.get("selected") == 1]
-                        if len(selected_files) > 1 and len(links) > 1:
-                            # Find index of our file among selected files
-                            sel_idx = 0
-                            for sf in selected_files:
-                                if sf.get("bytes") == fb and sf.get("path") == fp:
-                                    break
-                                sel_idx += 1
-                            if sel_idx < len(links):
-                                link_to_use = links[sel_idx]
+            # === 3. No exact match — try fuzzy ===
+            if fuzzy_match_url:
+                print(f"  🔸 Użycie FUZZY match: {fuzzy_match_info}")
+                if isinstance(fuzzy_match_url, tuple):
+                    links, idx = fuzzy_match_url
+                    url = await _unrestrict_file(client, auth, links, idx)
+                    if url:
+                        return await _hash_and_fetch(url)
+                elif isinstance(fuzzy_match_url, str):
+                    return await _hash_and_fetch(fuzzy_match_url)
 
-                        # Unrestrict to get direct download URL
-                        ur = await client.post(
-                            f"{RD_API}/unrestrict/link",
-                            headers=auth,
-                            data={"link": link_to_use},
-                        )
-                        if ur.status_code == 200:
-                            dl_url = ur.json().get("download")
-                            if dl_url:
-                                print(f"  🔗 Unrestricted OK!")
-                                return await _hash_and_fetch(dl_url)
-                        else:
-                            print(f"  ⚠️ Unrestrict failed: {ur.status_code}")
-
-                    # Log near-matches for debugging (within 5%)
-                    elif fb and abs(int(fb) - int(target)) < int(target) * 0.05:
-                        print(f"  🔸 NEAR match: torrent='{tname}' file='{fp}' bytes={fb} (diff={int(fb)-int(target)})")
-
-            print(f"ℹ️ RD: sprawdzono {checked} torrentów, nie znaleziono exact match dla size={target}")
-
-            # Debug: show sizes of first few downloads
-            dl_sizes = [(d.get("filename", "?")[:30], d.get("filesize")) for d in downloads[:3]]
-            print(f"ℹ️ RD /downloads (top 3): {dl_sizes}")
-
+            print(f"ℹ️ RD: brak matcha dla size={target}")
             return None
 
     except Exception as e:
-        print(f"❌ RD pipeline error: {e}")
+        print(f"❌ RD error: {e}")
         traceback.print_exc()
         return None
+
+
+async def _unrestrict_file(client, auth, links, file_idx):
+    """Unrestrict the correct link for a file inside a torrent."""
+    if not links:
+        print(f"  ⚠️ Brak linków do unrestrictu")
+        return None
+
+    link_idx = min(file_idx, len(links) - 1)
+    ur = await client.post(
+        f"{RD_API}/unrestrict/link",
+        headers=auth,
+        data={"link": links[link_idx]},
+    )
+    if ur.status_code == 200:
+        url = ur.json().get("download")
+        if url:
+            print(f"  🔗 Unrestricted OK")
+            return url
+    print(f"  ⚠️ Unrestrict failed: HTTP {ur.status_code}")
+    return None
 
 
 async def _hash_and_fetch(video_url: str) -> str | None:
@@ -137,17 +141,15 @@ async def _hash_and_fetch(video_url: str) -> str | None:
             if r.status_code not in (200, 206):
                 print(f"⚠️ Video download: HTTP {r.status_code}")
                 return None
-
             data = r.content
             if len(data) < 1024:
-                print(f"⚠️ Video chunk too small: {len(data)} bytes")
+                print(f"⚠️ Chunk too small: {len(data)}b")
                 return None
 
             napi_hash = hashlib.md5(data).hexdigest()
-            print(f"📊 NapiProjekt hash: {napi_hash} (from {len(data)} bytes)")
+            print(f"📊 NapiProjekt hash: {napi_hash} ({len(data)} bytes)")
 
         return await download_by_napi_hash(napi_hash, len(data))
-
     except Exception as e:
         print(f"❌ Hash/fetch error: {e}")
         traceback.print_exc()

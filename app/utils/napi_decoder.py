@@ -1,10 +1,12 @@
 """
-NapiProjekt subtitle decoder / downloader.
+NapiProjekt subtitle decoder — hash-based only.
 
-Methods:
-  1. Hash-based via dl.php with subhash token (subliminal-style)
-  2. Hash-based via api-napiprojekt3.php mode=1 (QNapi-style)
-  3. Title search via api-napiprojekt3.php mode=3 (may or may not work from cloud)
+NapiProjekt has NO title search API. The only way to get subtitles
+is to provide the MD5 hash of the first 10MB of the video file.
+
+Two endpoints:
+  A) dl.php + subhash token (subliminal-style)
+  B) api-napiprojekt3.php mode=1 (QNapi-style)
 """
 
 import io
@@ -27,22 +29,16 @@ def get_subhash(md5hash: str) -> str:
     add = [0, 0xd, 0x10, 0xb, 0x5]
     b = []
     for i in range(len(idx)):
-        a = add[i]
-        m = mul[i]
-        j = idx[i]
-        t = a + int(md5hash[j], 16)
+        t = add[i] + int(md5hash[idx[i]], 16)
         v = int(md5hash[t:t + 2], 16)
-        b.append(("%x" % (v * m))[-1])
+        b.append(("%x" % (v * mul[i]))[-1])
     return ''.join(b)
 
 
 def extract_7z_to_srt(data: bytes) -> str | None:
     try:
         archive = py7zr.SevenZipFile(io.BytesIO(data), mode='r', password=NAPI_PASSWORD)
-        filenames = archive.getnames()
-        if not filenames:
-            return None
-        extracted = archive.read(filenames)
+        extracted = archive.read(archive.getnames())
         archive.close()
         for name, bio in extracted.items():
             raw = bio.read()
@@ -53,35 +49,34 @@ def extract_7z_to_srt(data: bytes) -> str | None:
                         return ensure_srt_format(text)
                 except (UnicodeDecodeError, ValueError):
                     continue
-        return None
     except Exception as e:
         print(f"❌ 7z error: {e}")
-        return None
+    return None
 
 
 def ensure_srt_format(text: str) -> str:
     text = text.strip()
     if re.match(r'^\d+\s*\r?\n\d{2}:\d{2}:\d{2}', text):
         return text
-    if text.startswith('{') and re.match(r'^\{\d+\}\{\d+\}', text):
-        return _convert_microdvd(text)
+    if re.match(r'^\{\d+\}\{\d+\}', text):
+        return _microdvd(text)
     if re.match(r'^\d{1,2}:\d{2}:\d{2}[=:]', text):
-        return _convert_tmplayer(text)
+        return _tmplayer(text)
     return text
 
 
-def _convert_microdvd(text, fps=23.976):
+def _microdvd(text, fps=23.976):
     entries, c = [], 1
     for line in text.strip().split('\n'):
         m = re.match(r'\{(\d+)\}\{(\d+)\}(.+)', line.strip())
         if not m: continue
-        sf, ef = int(m.group(1)), int(m.group(2))
-        entries.append(f"{c}\n{_f2t(sf,fps)} --> {_f2t(ef,fps)}\n{m.group(3).replace('|',chr(10))}\n")
+        s, e = int(m.group(1)), int(m.group(2))
+        entries.append(f"{c}\n{_f2t(s,fps)} --> {_f2t(e,fps)}\n{m.group(3).replace('|',chr(10))}\n")
         c += 1
     return '\n'.join(entries)
 
 
-def _convert_tmplayer(text):
+def _tmplayer(text):
     entries, c = [], 1
     for line in text.strip().split('\n'):
         m = re.match(r'(\d{1,2}):(\d{2}):(\d{2})[=:](.+)', line.strip())
@@ -97,48 +92,30 @@ def _f2t(frame, fps):
     return f"{ms//3600000:02d}:{(ms%3600000)//60000:02d}:{(ms%60000)//1000:02d},{ms%1000:03d}"
 
 
-# =====================================================
-# METHOD A: dl.php + subhash (subliminal/qnapi style)
-# =====================================================
-
 async def download_via_dl(napi_hash: str, language: str = "PL") -> str | None:
-    if not napi_hash or len(napi_hash) != 32:
-        return None
-
+    """Method A: dl.php + subhash."""
     subhash = get_subhash(napi_hash)
     params = {
         "v": "dreambox", "kolejka": "false", "nick": "", "pass": "",
         "napios": "Linux", "l": language.upper(), "f": napi_hash, "t": subhash,
     }
-
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
             resp = await client.get(NAPI_DL_URL, params=params)
             print(f"📡 dl.php: status={resp.status_code} size={len(resp.content)}b")
-
-            if resp.status_code != 200:
+            if resp.status_code != 200 or resp.content[:4] == b'NPc0':
                 return None
-            if resp.content[:4] == b'NPc0':
-                print(f"ℹ️ dl.php: brak napisów")
-                return None
-
             srt = extract_7z_to_srt(resp.content)
             if srt:
-                print(f"✅ dl.php: OK! ({len(srt)} znaków)")
+                print(f"✅ dl.php: OK! ({len(srt)} zn)")
             return srt
     except Exception as e:
-        print(f"❌ dl.php error: {e}")
+        print(f"❌ dl.php: {e}")
         return None
 
-
-# =====================================================
-# METHOD B: api-napiprojekt3.php mode=1 (QNapi style)
-# =====================================================
 
 async def download_via_api(napi_hash: str, file_size: int = 0, language: str = "PL") -> str | None:
-    if not napi_hash or len(napi_hash) != 32:
-        return None
-
+    """Method B: api-napiprojekt3.php mode=1."""
     data = {
         "mode": "1",
         "client": "NapiProjektPython",
@@ -152,179 +129,62 @@ async def download_via_api(napi_hash: str, file_size: int = 0, language: str = "
 
     try:
         async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                NAPI_API_URL, data=data,
-                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "other"}
-            )
+            resp = await client.post(NAPI_API_URL, data=data,
+                headers={"Content-Type": "application/x-www-form-urlencoded", "User-Agent": "other"})
             print(f"📡 API mode=1: status={resp.status_code} size={len(resp.content)}b")
-
             if resp.status_code != 200 or len(resp.content) < 100:
-                print(f"ℹ️ API mode=1: brak napisów (response too short or error)")
                 return None
 
             text = resp.text
-            content = resp.content
-
-            # Try XML with base64-encoded 7z
+            # XML with base64 7z
             if "<content>" in text:
                 try:
                     root = ET.fromstring(text)
                     cn = root.find(".//content")
                     if cn is not None and cn.text:
-                        compressed = base64.b64decode(cn.text)
-                        srt = extract_7z_to_srt(compressed)
+                        srt = extract_7z_to_srt(base64.b64decode(cn.text))
                         if srt:
-                            print(f"✅ API mode=1 (XML/7z): OK! ({len(srt)} znaków)")
+                            print(f"✅ API (XML/7z): OK! ({len(srt)} zn)")
                             return srt
                 except ET.ParseError:
                     pass
-
-            # Try plain text SRT
-            if re.search(r'\d{2}:\d{2}:\d{2}', text):
-                print(f"✅ API mode=1 (text): OK!")
+            # Plain text SRT
+            if re.search(r'\d{2}:\d{2}:\d{2}', text) and len(text) > 200:
+                print(f"✅ API (text): OK!")
                 return ensure_srt_format(text)
-
-            # Try raw 7z
-            if content[:2] in (b'7z', b'\x37\x7a'):
-                srt = extract_7z_to_srt(content)
+            # Raw 7z
+            if resp.content[:2] in (b'7z', b'\x37\x7a'):
+                srt = extract_7z_to_srt(resp.content)
                 if srt:
-                    print(f"✅ API mode=1 (raw 7z): OK!")
+                    print(f"✅ API (7z): OK!")
                     return srt
 
-            print(f"ℹ️ API mode=1: nie rozpoznano formatu (first 80b: {content[:80]})")
+            print(f"ℹ️ API: nieznany format (first 60b: {resp.content[:60]})")
             return None
     except Exception as e:
-        print(f"❌ API mode=1 error: {e}")
+        print(f"❌ API mode=1: {e}")
         return None
 
-
-# =====================================================
-# METHOD C: api-napiprojekt3.php mode=3 (title search)
-# This endpoint is on napiprojekt.pl (no www), so might
-# bypass Cloudflare that blocks www.napiprojekt.pl
-# =====================================================
-
-async def search_via_api(title: str, year: str = "", language: str = "PL") -> str | None:
-    """
-    Try api-napiprojekt3.php with mode=3 for title-based search.
-    Returns SRT text or None.
-    """
-    search_query = title
-    if year:
-        search_query = f"{title} {year}"
-
-    data = {
-        "mode": "3",
-        "client": "NapiProjektPython",
-        "client_ver": "2.2.0.2399",
-        "search_title": search_query,
-        "search_year": year,
-        "downloaded_subtitles_lang": language.upper(),
-        "the": "end",
-    }
-
-    try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            resp = await client.post(
-                NAPI_API_URL, data=data,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "User-Agent": "NapiProjekt/2.2.0.2399 (Windows NT)",
-                }
-            )
-            print(f"📡 API mode=3 search '{search_query}': status={resp.status_code} size={len(resp.content)}b")
-            print(f"📡 API mode=3 response preview: {resp.text[:300]}")
-
-            if resp.status_code != 200:
-                print(f"⚠️ API mode=3: HTTP {resp.status_code}")
-                return None
-
-            text = resp.text
-
-            # Check if response contains subtitles
-            if "<content>" in text:
-                try:
-                    root = ET.fromstring(text)
-                    cn = root.find(".//content")
-                    if cn is not None and cn.text:
-                        compressed = base64.b64decode(cn.text)
-                        srt = extract_7z_to_srt(compressed)
-                        if srt:
-                            print(f"✅ API mode=3: napisy znalezione! ({len(srt)} znaków)")
-                            return srt
-                except ET.ParseError as e:
-                    print(f"⚠️ API mode=3: XML parse error: {e}")
-
-            # Check for hash references in response
-            hashes = re.findall(r'[a-f0-9]{32}', text)
-            if hashes:
-                print(f"🔗 API mode=3: znaleziono {len(hashes)} hashy, próbuję pobrać...")
-                for h in hashes[:3]:
-                    srt = await download_via_dl(h, language)
-                    if srt:
-                        return srt
-
-            # Check if it's a direct subtitle response
-            if re.search(r'\d{2}:\d{2}:\d{2}', text) and len(text) > 200:
-                print(f"✅ API mode=3 (direct text): OK!")
-                return ensure_srt_format(text)
-
-            print(f"ℹ️ API mode=3: brak napisów w odpowiedzi")
-            return None
-
-    except Exception as e:
-        print(f"❌ API mode=3 error: {e}")
-        traceback.print_exc()
-        return None
-
-
-# =====================================================
-# Combined hash download (try both methods)
-# =====================================================
 
 async def download_by_napi_hash(napi_hash: str, file_size: int = 0, language: str = "PL") -> str | None:
+    """Try both methods."""
     if not napi_hash or len(napi_hash) != 32:
         print(f"⚠️ Invalid hash: '{napi_hash}'")
         return None
 
-    print(f"🎯 Napi hash download: {napi_hash}")
-
-    # Try dl.php first (simpler, proven)
+    print(f"🎯 Napi: pobieranie po hash {napi_hash}")
     result = await download_via_dl(napi_hash, language)
     if result:
         return result
-
-    # Fallback to API mode=1
     result = await download_via_api(napi_hash, file_size, language)
     if result:
         return result
-
-    print(f"ℹ️ Napi: brak napisów dla hash {napi_hash}")
+    print(f"ℹ️ Napi: brak napisów dla {napi_hash}")
     return None
 
 
-# =====================================================
-# Main entry point
-# =====================================================
-
-async def get_napi_subtitles_text(
-    napi_hash: str = None,
-    title: str = None,
-    year: str = "",
-    file_size: int = 0,
-    language: str = "PL",
-) -> str | None:
-    """Main function called by main.py."""
-
-    # Direct hash download
+async def get_napi_subtitles_text(napi_hash: str = None, **kwargs) -> str | None:
+    """Main entry point. Only hash-based — NapiProjekt has no title search API."""
     if napi_hash and len(napi_hash) == 32:
-        return await download_by_napi_hash(napi_hash, file_size, language)
-
-    # Title search via API mode=3
-    if title:
-        print(f"🔍 Napi: title search via API mode=3 for '{title}' ({year})")
-        result = await search_via_api(title, year, language)
-        if result:
-            return result
-
+        return await download_by_napi_hash(napi_hash)
     return None
