@@ -8,4 +8,3 @@ python-Levenshtein
 python-dotenv
 py7zr>=0.20
 requests>=2.31
-cloudscraper>=1.2.71
