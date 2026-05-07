@@ -1,51 +1,149 @@
-# NapiProjekt + OpenSubtitles Stremio Addon
+## 🌍 Language
+- 🇬🇧 English (default)
+- 🇵🇱 [Polski](README.pl.md)
 
-Addon do Stremio, który pobiera polskie napisy z NapiProjekt oraz OpenSubtitles jeśli na pierwszym serwisie ich nie ma.
+# NapiProjekt Stremio Addon 🎬
 
-## Funkcje
+A Stremio addon that fetches **Polish subtitles** from [NapiProjekt](https://www.napiprojekt.pl) with optional fallback to [OpenSubtitles](https://www.opensubtitles.com).
 
-- Scraping NapiProjekt
+You can install addon from here: [napiprojekt-stremio-addon.duckdns.org](https://napiprojekt-stremio-addon.duckdns.org)
 
-- Pobieranie najlepszych wersji napisów `.srt`
+---
 
-- Fallback do OpenSubtitles
+## How it works
 
-- Cache w pamięci
+1. When you watch a movie in Stremio (via Torrentio + Real-Debrid), the file lands in your RD account
+2. The addon finds the file on RD by matching the video size
+3. It downloads the first 10MB of the file and computes an MD5 hash (NapiProjekt format)
+4. It fetches subtitles from NapiProjekt using that hash
+5. Subtitles are served as an SRT file directly to Stremio
 
-- Retry i timeout przy pobieraniu
+---
 
-- Kompatybilne z Stremio
+## Requirements
 
-## Instalacja
+- [Real-Debrid](https://real-debrid.com) account (required)
+- [OpenSubtitles](https://www.opensubtitles.com/consumers) API key (optional, for fallback)
+- [TMDB](https://www.themoviedb.org/settings/api) API key (optional, for movie title display)
+- Docker or Python 3.12+
 
-1. Zainstaluj zależności:
+---
+
+## Quick start (docker)
+You can run this project as a Docker container using the pre-built image. This is the fastest way to deploy the addon without the need to set up a local Python environment.
+
+Run the container:
 ```bash
-npm  install
+docker run -d \
+  --name napiprojekt-stremio-addon \
+  -p 8081:8081 \
+  -e BASE_URL=http://localhost:8081 \
+  docker.io/ludvickpro/napiprojekt-stremio-addon:latest
 ```
 
-2. Ustaw zmienne środowiskowe (opcjonalnie):
+## Docker deployment (recommended)
+
+### Build locally
+
 ```bash
-export  HOSTNAME_URL="https://twojadomena.com"
-export  PORT=7000
-#Klucz API do OpenSubtitles:
-export  OS_API_KEY="TWÓJ_KLUCZ_API"
-#Jeśli nie znajdzie napisów w Napiprojekt, wyszukaj w OpenSubtitles:
-export  ENABLE_OS_FALLBACK=true
+git clone https://github.com/piotrek1488/napiprojekt-stremio-addon.git
+cd napiprojekt-stremio-addon
+git checkout gemini
+
+docker build -t napiprojekt-addon .
+
+docker run -d \
+  --name napiprojekt-addon \
+  --restart unless-stopped \
+  -p 8081:8081 \
+  -e BASE_URL=https://your.duckdns.org \
+  -e TMDB_API_KEY=your_tmdb_key \
+  napiprojekt-addon
 ```
 
-3. Uruchom serwer:
-```bash
-npm  start
+### Docker Compose
+
+```yaml
+services:
+  napiprojekt-addon:
+    build: .
+    container_name: napiprojekt-addon
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      - BASE_URL=https://your.duckdns.org
+      - TMDB_API_KEY=your_tmdb_key
+      - PORT=8081
 ```
 
-4. Dodaj addon do Stremio używając URL: http://localhost:7000/manifest.json lub https://twojadomena.com:PORT/manifest.json
+---
 
-## Uwagi dotyczące działania
+## Python deployment
 
-- Addon najpierw próbuje NapiProjekt. Jeśli nie znajdzie napisów, automatycznie przechodzi do OpenSubtitles.
+```bash
+git clone https://github.com/piotrek1488/napiprojekt-stremio-addon.git
+cd napiprojekt-stremio-addon
+git checkout gemini
 
-- Nazwy plików wideo mają duże znaczenie dla dopasowania napisów. Najlepsze efekty dają nazwy w stylu *The.Matrix.1999.1080p.BluRay.x264*.
+pip install -r requirements.txt
 
-- Jeśli OpenSubtitles zwraca wiele wyników, addon wybiera 3 pierwsze.
+cat > .env << EOF
+BASE_URL=https://your.duckdns.org
+TMDB_API_KEY=your_tmdb_key
+PORT=8081
+EOF
 
-- Można modyfikować scoring i ranking w [scoring.service.js](./src/services/scoring.service.js).
+python run.py
+```
+
+---
+
+## Configuration in Stremio
+
+1. Open `https://your.duckdns.org` in your browser
+2. Paste your Real-Debrid token (find it at [real-debrid.com/apitoken](https://real-debrid.com/apitoken))
+3. (Optional) Paste your OpenSubtitles API key
+4. Choose options:
+   - **OpenSubtitles fallback** — search OS when no subtitles found on NapiProjekt *(enabled by default)*
+   - **Always search OpenSubtitles** — show subtitles from both sources simultaneously
+5. Click **Generate link** and install the addon in Stremio
+
+---
+
+## Environment variables
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `BASE_URL` | Public server URL e.g. `https://your.duckdns.org` | ✅ |
+| `PORT` | Server port (default `8081`) | ❌ |
+| `TMDB_API_KEY` | TMDB API key for movie title display | ❌ |
+
+Real-Debrid and OpenSubtitles tokens are passed via the configuration URL — they are not stored on the server.
+
+---
+
+## Reverse proxy (Caddy)
+
+```caddy
+your.duckdns.org {
+    reverse_proxy localhost:8081
+}
+```
+
+---
+
+## Debug endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `/debug/rd-files?rd_token=X` | List all RD files with sizes |
+| `/debug/rd-napi?rd_token=X&video_size=Y` | Test full RD → NapiProjekt pipeline |
+| `/debug/napi?hash=X` | Test subtitle download by MD5 hash |
+| `/debug/napi-raw?hash=X` | Raw NapiProjekt response before format conversion |
+
+---
+
+## License
+
+MIT

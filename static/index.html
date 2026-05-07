@@ -1,0 +1,296 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>Napiprojekt Stremio Addon</title>
+
+  <!-- Ikony -->
+  <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" rel="stylesheet">
+
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+      font-family: Arial, sans-serif;
+    }
+
+    body {
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      /* background: url('background.jpg') no-repeat center center/cover; */
+      background: linear-gradient(135deg, #0f0f0f 0%, #1a1a1a 100%);
+      color: #eee;
+    }
+
+    /* === BANNER === */
+    .banner {
+      width: 100%;
+      background: rgba(45, 45, 45, 0.82);
+      backdrop-filter: blur(10px);
+
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+
+      padding: 60px 20px;
+      text-align: center;
+    }
+
+    .title {
+      font-size: 80px;
+      font-weight: 800;
+      line-height: 1.1;
+      margin-bottom: 20px;
+    }
+
+    .description {
+      max-width: 600px;
+      margin: 0 auto 30px;
+      font-size: 18px;
+      color: #ccc;
+    }
+
+    /* === BUTTONS === */
+    .buttons {
+      display: flex;
+      justify-content: center;
+      gap: 20px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 14px 26px;
+      border-radius: 10px;
+      font-size: 16px;
+      text-decoration: none;
+      font-weight: 600;
+      transition: 0.2s;
+      margin-top: 20px;
+      margin-bottom: 20px;
+    }
+
+    .btn-green {
+      background: #5bbf8a;
+      color: #0f1f17;
+    }
+
+    .btn-green:hover {
+      background: #6bcf9a;
+    }
+
+    /* === FOOTER === */
+    footer {
+      margin-top: auto;
+      text-align: center;
+      padding: 20px;
+      font-size: 14px;
+      color: #888;
+      background: rgba(0,0,0,0.8);
+      backdrop-filter: blur(6px);
+
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 15px;
+    }
+
+    .github {
+      font-size: 20px;
+      color: #aaa;
+      transition: 0.2s;
+    }
+
+    .github:hover {
+      color: #fff;
+    }
+
+    a {
+      color: #7ed6a5;
+      text-decoration: none;
+      transition: 0.2s;
+    }
+
+    a:hover {
+      color: rgba(110,110,110,0.8);
+      text-decoration: underline;
+    }
+
+    @media (max-width: 768px) {
+      .title {
+        font-size: 42px;
+      }
+
+      .description {
+        font-size: 16px;
+      }
+    }
+
+    .file-path {
+      margin-top: 20px;
+      padding: 12px 16px;
+      width: 100%;
+      max-width: 800px;
+      background-color: rgba(100, 100, 100, 0.82);
+      border: 1px solid #555;
+      border-radius: 6px;
+      font-family: monospace;
+      color: #ccc;
+      word-break: break-all;
+      user-select: all;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.5);
+      max-width: 600px;
+      font-size: 18px;
+    }
+
+    .file-input {
+      width: 100%;
+      max-width: 800px;
+      padding: 8px 12px;
+      font-family: monospace;
+      font-size: 14px;
+      border: inset ;
+      border-width: 3px 3px;
+      border-color: rgba(0,0,0,0.8);
+      background: none;
+      color: #fff;
+      outline: none;
+      user-select: all;
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+
+  <div class="banner">
+    <div class="title">
+      Napiprojekt<br/>Stremio Addon
+    </div>
+
+    <div class="description">
+      Automatyczne wczytywanie polskich napisów do filmów i&nbsp;seriali z&nbsp;<a href="https://www.napiprojekt.pl">Napiprojekt.pl</a> w&nbsp;<a href="https://web.strem.io">Stremio</a>.
+    </div>
+    <div style="margin-top:30px; max-width:600px; width:100%;margin-bottom:30px;">
+      <input id="rdToken" class="file-input" type="text" value="{rd_token_prefill}" placeholder="Wklej swój Real-Debrid API token">
+      <p style="margin-top:10px; margin-bottom:20px; font-size:13px; color:#aaa;">
+        Token Real-Debrid znajdziesz tutaj:
+        <a href="https://real-debrid.com/apitoken" target="_blank">real-debrid.com/apitoken</a>
+      </p>
+      <input id="osToken" class="file-input" type="text" value="{os_api_key_prefill}" placeholder="Wklej swój OpenSubtitles API token">
+      <p style="margin-top:10px; margin-bottom:20px; font-size:13px; color:#aaa;">
+        Token OpenSubtitles znajdziesz tutaj:
+        <a href="https://www.opensubtitles.com/pl/consumers" target="_blank">opensubtitles.com/pl/consumers</a>
+      </p>
+
+      <div style="margin-top:10px; margin-bottom:10px; display:flex; align-items:center; gap:10px; justify-content:center;">
+        <input id="osFallback" type="checkbox" checked style="width:20px; height:20px; cursor:pointer; accent-color:#5bbf8a;">
+        <label for="osFallback" style="font-size:15px; color:#ccc; cursor:pointer;">
+          Fallback do OpenSubtitles gdy brak napisów w NapiProjekt
+        </label>
+      </div>
+      <div style="margin-top:5px; margin-bottom:20px; display:flex; align-items:center; gap:10px; justify-content:center;">
+        <input id="alwaysOs" type="checkbox" style="width:20px; height:20px; cursor:pointer; accent-color:#5bbf8a;">
+        <label for="alwaysOs" style="font-size:15px; color:#ccc; cursor:pointer;">
+          Zawsze szukaj w OpenSubtitles (niezależnie od NapiProjekt)
+        </label>
+      </div>
+
+
+      <div style="margin-top:15px;">
+        <button onclick="generateLink()" class="btn btn-green">
+          <i class="fa-solid fa-gear"></i>
+          Generuj link
+        </button>
+      </div>
+    </div>
+
+    <div id="generated" class="file-path" style="display:none; text-align:center;">
+      <p>Twój spersonalizowany manifest:</p><br>
+
+      <input id="generatedLink" class="file-input" readonly>
+
+      <div class="buttons">
+        
+        <a id="installApp" class="btn btn-green">
+          <i class="fa-solid fa-download"></i>
+          Instaluj (App)
+        </a>
+
+        <a id="installWeb" class="btn btn-green">
+          <i class="fa-solid fa-download"></i>
+          Instaluj (Web)
+        </a>
+
+      </div>
+    </div>
+  </div>
+
+  <footer>
+    © 2026 Napiprojekt Stremio Addon v{version_placeholder}</span>
+    <a href="https://github.com/piotrek1488/napiprojekt-stremio-addon/tree/gemini" target="_blank" class="github">
+      <i class="fab fa-github"></i>
+    </a>
+  </footer>
+<script>
+function generateLink() {
+  const rdInput  = document.getElementById("rdToken").value.trim();
+  const osInput = document.getElementById("osToken").value.trim();
+  const osFallback = document.getElementById("osFallback").checked;
+  const alwaysOs = document.getElementById("alwaysOs").checked;
+
+  if (!rdInput) {
+    alert("Wklej token Real-Debrid");
+    return;
+  }
+  if ((osFallback || alwaysOs) && !osInput) {
+    alert("OpenSubtitles wymaga tokenu API");
+    return;
+  }
+
+  const base = "{public_url}";
+  let manifestUrl = `${base}/manifest.json?rd_token=${rdInput}`;
+  if (osInput) manifestUrl += `&os_api_key=${osInput}`;
+  if (!osFallback) manifestUrl += `&os_fallback=false`;
+  if (alwaysOs) manifestUrl += `&always_os=true`;
+
+  // link dla Web Stremio
+  const webUrl = `https://web.strem.io/#/addons?addon=${encodeURIComponent(manifestUrl)}`;
+
+  // link dla App (deep link)
+  const appUrl = `stremio://${manifestUrl}`;
+
+  document.getElementById("generated").style.display = "block";
+  document.getElementById("generatedLink").value = manifestUrl;
+
+  document.getElementById("installWeb").href = webUrl;
+  document.getElementById("installApp").href = appUrl;
+}
+</script>
+<script>
+const params = new URLSearchParams(window.location.search);
+
+document.getElementById("rdToken").value = params.get("rd_token") || "";
+document.getElementById("osToken").value = params.get("os_api_key") || "";
+</script>
+    <!-- <script>
+        // Pobieramy plik version.txt z serwera
+        fetch('/version')
+            .then(response => response.text())   // czytamy jako tekst
+            .then(text => {
+                document.getElementById('version').textContent = text.trim();
+            })
+            .catch(err => {
+                console.error('Błąd przy pobieraniu wersji:', err);
+                document.getElementById('version').textContent = "Nie udało się pobrać wersji";
+            });
+    </script> -->
+</body>
+</html>
