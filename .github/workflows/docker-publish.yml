@@ -11,7 +11,7 @@ jobs:
 
     environment:
       name: docker.io
-      url: https://hub.docker.com/r/${{ secrets.DOCKERHUB_USERNAME }}/napiprojekt-stremio-addon
+      url: https://hub.docker.com/r/ludvickpro/napiprojekt-stremio-addon
 
     steps:
       - name: Checkout code
