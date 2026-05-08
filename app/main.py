@@ -60,6 +60,31 @@ _filter = TokenMaskFilter()
 for _logger_name in ("uvicorn.access", "uvicorn"):
     logging.getLogger(_logger_name).addFilter(_filter)
 
+def parse_user_config(request: Request, userdata: str = "") -> dict:
+    """
+    Parse user config from both sources:
+    - Query params: ?rd_token=X&os_api_key=Y (custom install / index.html)
+    - Path segment: /rd_token=X&os_api_key=Y/manifest.json (Stremio store)
+    """
+    config = {}
+
+    # From path segment (Stremio store format)
+    if userdata:
+        try:
+            decoded = urllib.parse.unquote(userdata)
+            parsed = urllib.parse.parse_qs(decoded)
+            config = {k: v[0] for k, v in parsed.items()}
+        except Exception:
+            pass
+
+    # Query params override path segment
+    for key in ["rd_token", "os_api_key", "os_fallback", "always_os"]:
+        val = request.query_params.get(key)
+        if val is not None:
+            config[key] = val
+
+    return config
+
 app = FastAPI()
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True,
                    allow_methods=["*"], allow_headers=["*"])
@@ -102,6 +127,7 @@ async def version():
 # --- MANIFEST ---
 
 @app.get("/manifest.json")
+@app.get("/{userdata}/manifest.json")
 async def get_manifest(request: Request):
     host = request.headers.get("host", "127.0.0.1:8081")
     protocol = "https" if request.url.scheme == "https" or "duckdns" in host or "127.0.0.1" in host else "http"
@@ -115,23 +141,28 @@ async def get_manifest(request: Request):
         "types": ["movie", "series"],
         "resources": [{"name": "subtitles", "types": ["movie", "series"], "idPrefixes": ["tt"]}],
         "catalogs": [],
-        "behaviorHints": {"configurable": True},
+        "behaviorHints": {"configurable": True, "configurationRequired": True},
         "config": [
-            {"name": "rd_token", "type": "string", "title": "Real-Debrid Token", "default": ""},
-            {"name": "os_api_key", "type": "string", "title": "OpenSubtitles API Key (opcjonalny)", "default": ""},
+            {"key": "rd_token", "type": "password", "title": "Real-Debrid Token", "required": True},
+            {"key": "os_api_key", "type": "password", "title": "OpenSubtitles API Key (opcjonalny)", "required": False},
+            {"key": "os_fallback", "type": "checkbox", "title": "Fallback do OpenSubtitles gdy brak napisów w NapiProjekt", "default": "checked"},
+            {"key": "always_os", "type": "checkbox", "title": "Zawsze szukaj w OpenSubtitles (niezależnie od NapiProjekt)"},
         ],
     }
 
 
 # --- SUBTITLES ---
 
+@app.get("/{userdata}/subtitles/{type}/{id}/{extra:path}")
+@app.get("/{userdata}/subtitles/{type}/{id}.json")
 @app.get("/subtitles/{type}/{id}/{extra:path}")
 @app.get("/subtitles/{type}/{id}.json")
-async def get_subtitles(type: str, id: str, request: Request, extra: str = None):
-    os_api_key = request.query_params.get("os_api_key")
-    rd_token = request.query_params.get("rd_token")
-    os_fallback = request.query_params.get("os_fallback", "true").lower() == "true"
-    always_os = request.query_params.get("always_os", "false").lower() == "true"
+async def get_subtitles(type: str, id: str, request: Request, extra: str = None, userdata: str = ""):
+    cfg = parse_user_config(request, userdata)
+    os_api_key = cfg.get("os_api_key")
+    rd_token = cfg.get("rd_token")
+    os_fallback = cfg.get("os_fallback", "true").lower() == "true"
+    always_os = cfg.get("always_os", "false").lower() == "true"
     if not rd_token:
         return {"subtitles": []}
 

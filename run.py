@@ -31,6 +31,7 @@ class TokenMaskFilter(logging.Filter):
 if __name__ == "__main__":
     port = int(os.getenv("PORT", 8081))
     base_url = os.getenv("BASE_URL", "").strip().rstrip("/")
+    dev_mode = os.getenv("DEV", "false").lower() == "true"
 
     manifest_url = f"{base_url}/manifest.json" if base_url else f"http://127.0.0.1:{port}/manifest.json"
     home_url = f"{base_url}/" if base_url else f"http://127.0.0.1:{port}/"
@@ -38,9 +39,17 @@ if __name__ == "__main__":
     print(f"🚀 Serwer startuje na porcie: {port}")
     print(f"🔗 Link do manifestu: {manifest_url}")
     print(f"🏠 Strona główna: {home_url}")
+    print(f"🔧 Tryb: {'development (reload)' if dev_mode else 'production'}")
 
     _filter = TokenMaskFilter()
     for name in ("uvicorn.access", "uvicorn", "uvicorn.error"):
         logging.getLogger(name).addFilter(_filter)
 
-    uvicorn.run("app.main:app", host="0.0.0.0", port=port)
+    uvicorn.run(
+        "app.main:app",
+        host="0.0.0.0",
+        port=port,
+        reload=dev_mode,          # reload tylko w dev
+        workers=1 if dev_mode else 2,  # multi-worker w produkcji
+        log_level="info",
+    )
