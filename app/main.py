@@ -148,6 +148,10 @@ async def get_manifest(request: Request):
             {"key": "os_fallback", "type": "checkbox", "title": "Fallback do OpenSubtitles gdy brak napisów w NapiProjekt", "default": "checked"},
             {"key": "always_os", "type": "checkbox", "title": "Zawsze szukaj w OpenSubtitles (niezależnie od NapiProjekt)"},
         ],
+        "stremioAddonsConfig": {
+            "issuer": "https://stremio-addons.net",
+            "signature": "eyJhbGciOiJkaXIiLCJlbmMiOiJBMTI4Q0JDLUhTMjU2In0..8GEfZoX-pSQeyE7PK2z-Mw.wq9pv8MPz-jU21FOWy5xl1EpMWudBExSGXZAyIpbLT5Rv2qyhkv2XzeAe14tbBNreBIWMR-iydnQPaoZrP0VI6JACi-AWaRPvuFC_UOrjtP4s54WeTwq3uYYIhGHvjdC.Ffb2OILY1gnVYz4SwCeAVQ"
+        },
     }
 
 
