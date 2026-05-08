@@ -141,7 +141,7 @@ async def get_manifest(request: Request):
         "types": ["movie", "series"],
         "resources": [{"name": "subtitles", "types": ["movie", "series"], "idPrefixes": ["tt"]}],
         "catalogs": [],
-        "behaviorHints": {"configurable": True, "configurationRequired": True},
+        "behaviorHints": {"configurable": True},
         "config": [
             {"key": "rd_token", "type": "password", "title": "Real-Debrid Token", "required": True},
             {"key": "os_api_key", "type": "password", "title": "OpenSubtitles API Key (opcjonalny)", "required": False},
